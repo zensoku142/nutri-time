@@ -1,0 +1,26 @@
+// ==================== Android 全局编译版本 ====================
+// 这些版本供 app 模块统一读取，避免同一工程的编译工具和系统版本互相不匹配。
+buildscript {
+    ext {
+        buildToolsVersion = "36.0.0"
+        minSdkVersion = 24
+        compileSdkVersion = 36
+        targetSdkVersion = 36
+        ndkVersion = "27.1.12297006"
+        kotlinVersion = "2.1.20"
+    }
+    // ---------- 插件下载来源 ----------
+    repositories {
+        google()
+        mavenCentral()
+    }
+    // ---------- 编译插件 ----------
+    // 这里只声明构建应用所需的工具，真正随安装包发布的依赖写在 app/build.gradle。
+    dependencies {
+        classpath("com.android.tools.build:gradle")
+        classpath("com.facebook.react:react-native-gradle-plugin")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+    }
+}
+
+apply plugin: "com.facebook.react.rootproject"

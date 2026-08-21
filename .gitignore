@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Expo and React Native generated output
+apps/mobile/.expo/
+apps/mobile/dist/
+coverage/
+apps/mobile/android/.gradle/
+apps/mobile/android/app/build/
+apps/mobile/android/build/
+apps/mobile/android/.cxx/
+apps/mobile/android/app/.cxx/
+apps/mobile/android/.kotlin/
+**/local.properties
+*.apk
+*.aab
+
+# Local development state
+.idea/
+.vscode/
+.bundle/
+.metro-health-check*
+*.log
+*.hprof
+*.iml
+
+# Local environment and release credentials
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+!apps/mobile/android/app/debug.keystore
+*.p12
+*.pem
+*.mobileprovision
+
+# Keep only the approved fasting design set in the initial repository
+design/fasting/*.png
+
+# Operating system files
+.DS_Store
+Thumbs.db
