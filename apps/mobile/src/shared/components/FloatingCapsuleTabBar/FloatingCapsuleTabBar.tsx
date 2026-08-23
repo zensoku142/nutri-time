@@ -618,7 +618,7 @@ const styles = StyleSheet.create({
   maskArea: {
     position: 'absolute',
     // React Native 0.86 由原生视图直接绘制一整条线性渐变，不再拉伸 PNG 或叠加实色层。
-    // 三个颜色使用与页面相同的白色，只连续改变透明度，因此中线没有硬边或亮色带。
+    // 三个颜色应由调用方提供同一页面底色，只连续改变透明度，避免中线出现硬边或亮色带。
     top: BOTTOM_MASK_START_OFFSET - BOTTOM_MASK_TRANSITION_HEIGHT,
     right: 0,
     left: 0,

@@ -12,6 +12,7 @@ import {
   calculateDragPosition,
   getNearestTabIndex,
 } from './AppTabBar';
+import {theme} from '../theme';
 
 const mockEmit = jest.fn(() => ({defaultPrevented: false}));
 const mockNavigate = jest.fn();
@@ -162,5 +163,35 @@ test('吸附动画不会越过目标或阻塞页面切换', async () => {
       overshootClamping: true,
       isInteraction: false,
     }),
+  );
+});
+
+test('底部渐隐使用页面底色，不会叠出白色雾带', async () => {
+  let renderer: ReactTestRenderer.ReactTestRenderer;
+
+  await ReactTestRenderer.act(() => {
+    renderer = ReactTestRenderer.create(<AppTabBar {...createTabBarProps()} />);
+  });
+
+  const renderedTree = JSON.stringify(renderer!.toJSON());
+  const backgroundHex = theme.colors.background.slice(1);
+  const backgroundRgb = [0, 2, 4]
+    .map(offset =>
+      Number.parseInt(backgroundHex.slice(offset, offset + 2), 16),
+    )
+    .join(', ');
+
+  // 测试从当前页面底色计算预期值；以后只改 background，不需要再手动改这条测试。
+  expect(theme.colors.navigationMaskTransparent).toBe(
+    `rgba(${backgroundRgb}, 0)`,
+  );
+  expect(theme.colors.navigationMaskStart).toBe(
+    `rgba(${backgroundRgb}, 0.65)`,
+  );
+  expect(theme.colors.navigationMaskEnd).toBe(
+    `rgba(${backgroundRgb}, 0.95)`,
+  );
+  expect(renderedTree).toContain(
+    `linear-gradient(to bottom, ${theme.colors.navigationMaskTransparent} 0px, ${theme.colors.navigationMaskStart} 8px, ${theme.colors.navigationMaskEnd} 100%)`,
   );
 });

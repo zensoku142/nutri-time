@@ -22,9 +22,9 @@
     capsuleBackground: 'rgba(255, 255, 255, 0.82)',
     capsuleBorder: 'rgba(255, 255, 255, 0.94)',
     indicatorBackground: 'rgba(255, 120, 106, 0.10)',
-    maskTransparent: 'rgba(255, 255, 255, 0)',
-    maskStart: 'rgba(255, 255, 255, 0.65)',
-    maskEnd: 'rgba(255, 255, 255, 0.95)',
+    maskTransparent: 'rgba(244, 244, 244, 0)',
+    maskStart: 'rgba(244, 244, 244, 0.65)',
+    maskEnd: 'rgba(244, 244, 244, 0.95)',
     shadow: '#1F2423',
   }}
 />
