@@ -9,7 +9,7 @@
 ## 当前仓库状态
 
 - `apps/mobile`：从 MochiLedger 复用的 React Native 导航基线，保留“禁食 / 统计”悬浮胶囊导航。
-- `apps/wear`：尚未创建 Wear OS 工程。
+- `apps/wear`：阶段 0A 的 Compose for Wear OS 最小模板，只显示 `NutriTime Wear`，尚未实现断食业务或手机同步。
 - `design/fasting`：禁食页三个状态的视觉设计稿。
 - `docs/NutriTime-implementation-plan.md`：完整分阶段实施计划。
 

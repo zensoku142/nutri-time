@@ -12,7 +12,7 @@ NutriTime/
 ├─ README.md
 ├─ apps/
 │  ├─ mobile/                 # React Native 手机工程
-│  └─ wear/                   # Wear OS 工程预留位置
+│  └─ wear/                   # Kotlin + Compose for Wear OS 手表工程
 ├─ design/
 │  └─ fasting/                # 禁食页视觉设计稿
 └─ docs/
@@ -30,7 +30,7 @@ NutriTime/
 - 只保留“禁食 / 统计”悬浮胶囊导航、最小占位页面、字体和静态资源。
 - 记账业务、API、请求缓存、详情、表单和个人中心没有迁移。
 - 手机工程当前仍是 React Native CLI 基线，尚未完成 Expo Development Build/CNG 转换。
-- Wear OS 工程尚未创建。
+- `apps/wear` 已建立只显示 `NutriTime Wear` 的 Compose for Wear OS 最小模板，尚未加入断食业务或手机同步。
 
 ## 手机端运行
 
