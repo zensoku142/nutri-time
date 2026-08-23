@@ -26,6 +26,11 @@ jest.mock('expo-notifications', () => ({
   setNotificationHandler: jest.fn(),
 }));
 
+// 启动测试没有 Android 原生环境，因此只隔离开发诊断模块；真正桥接由模拟器实测确认。
+jest.mock('../modules/wear-data-layer', () => ({
+  ping: jest.fn(),
+}));
+
 test('可以完成本地恢复并渲染禁食首页', async () => {
   let renderer: ReactTestRenderer.ReactTestRenderer;
 
