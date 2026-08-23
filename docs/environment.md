@@ -32,6 +32,7 @@
 - Expo SDK：57.0.0（`expo` 包当前为 57.0.15）
 - expo-dev-client：57.0.14
 - expo-splash-screen：57.0.7
+- react-native-svg：15.15.4，用于绘制手机禁食页的正圆和圆头状态弧线
 - React Native：0.86.2
 - React：19.2.3
 - Android compileSdk / targetSdk：36

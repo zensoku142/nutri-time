@@ -24,6 +24,7 @@ export const theme = {
     text: '#1F2423',
     textSecondary: '#6B7270',
     primary: '#426561',
+    fastingActive: '#63D18A',
     navigationActive: '#FF786A',
     navigationInactive: '#969696',
     // RGBA（带透明度的颜色）最后一个数字越小，越能看见它下面的颜色。

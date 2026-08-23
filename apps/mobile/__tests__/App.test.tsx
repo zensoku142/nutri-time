@@ -12,7 +12,7 @@ jest.mock('react-native-safe-area-context', () =>
   jest.requireActual('react-native-safe-area-context/jest/mock').default,
 );
 
-test('可以渲染基础应用和首页', async () => {
+test('可以渲染阶段 1 禁食首页', async () => {
   let renderer: ReactTestRenderer.ReactTestRenderer;
 
   // act 会等 React 完成本轮页面更新，避免导航还没准备好，测试就提前检查结果。
@@ -20,10 +20,11 @@ test('可以渲染基础应用和首页', async () => {
     renderer = ReactTestRenderer.create(<App />);
   });
 
-  // 标题来自真实首屏，能证明 App 不只是创建了空 Provider。
+  // 品牌和主按钮都来自真实首屏，能证明 App 不只是创建了空 Provider 或导航占位。
   const renderedTree = JSON.stringify(renderer!.toJSON());
-  expect(renderedTree).toContain('禁食');
+  expect(renderedTree).toContain('NutriTime');
+  expect(renderedTree).toContain('开始断食');
 
-  // 首页通过共享 Screen 组件读取全局背景色；检查真实渲染结果可防止主题变量被误改。
+  // 禁食页读取全局主题背景；检查真实渲染结果可防止页面与悬浮导航使用不同底色。
   expect(renderedTree).toContain('#F4F4F4');
 });
