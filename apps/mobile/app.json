@@ -2,6 +2,7 @@
   "expo": {
     "name": "NutriTime",
     "slug": "nutritime",
+    "icon": "./assets/branding/app-icon.png",
     "version": "1.0.0",
     "platforms": [
       "android"
@@ -11,7 +12,12 @@
       "package": "com.zensoku.nutritime",
       "versionCode": 1000001,
       "allowBackup": false,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/branding/adaptive-icon-foreground.png",
+        "backgroundColor": "#63D18A",
+        "monochromeImage": "./assets/branding/adaptive-icon-monochrome.png"
+      }
     },
     "plugins": [
       [
