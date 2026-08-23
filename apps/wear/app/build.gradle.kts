@@ -48,7 +48,10 @@ dependencies {
     implementation(libs.ui.graphics)
     implementation(libs.ui.tooling.preview)
     implementation(libs.wear.tooling.preview)
+    testImplementation(libs.junit)
     androidTestImplementation(platform(libs.compose.bom))
+    // Compose 测试旧版间接带入的 Espresso 无法运行在 API 37；显式使用已修复该兼容问题的官方稳定版。
+    androidTestImplementation(libs.espresso.core)
     androidTestImplementation(libs.ui.test.junit4)
     debugImplementation(libs.ui.test.manifest)
     debugImplementation(libs.ui.tooling)

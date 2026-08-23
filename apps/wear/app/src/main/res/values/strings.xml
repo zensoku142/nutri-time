@@ -1,3 +1,17 @@
 <resources>
     <string name="app_name">NutriTime</string>
+    <string name="wear_loading">正在准备…</string>
+    <string name="wear_no_data_title">尚未收到状态</string>
+    <string name="wear_no_data_message">请先在 Android 手机上打开 NutriTime</string>
+    <string name="wear_idle_title">当前未在断食</string>
+    <string name="wear_idle_message">手机已同步当前状态</string>
+    <string name="wear_fasting">断食进行中</string>
+    <string name="wear_remaining">剩余时间</string>
+    <string name="wear_goal_reached">目标已达成</string>
+    <string name="wear_waiting_for_phone">等待手机确认结束</string>
+    <string name="wear_started">开始</string>
+    <string name="wear_target">目标</string>
+    <string name="wear_sync_error_title">同步数据暂不可用</string>
+    <string name="wear_sync_error_action">请更新 NutriTime</string>
+    <string name="wear_sync_error_badge">同步异常 · 请更新</string>
 </resources>
