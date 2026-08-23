@@ -32,6 +32,7 @@
 - Expo SDK：57.0.0（`expo` 包当前为 57.0.15）
 - expo-dev-client：57.0.14
 - expo-splash-screen：57.0.7
+- expo-notifications：57.0.13，用于只在 Android 手机安排目标时间附近的本地提醒
 - react-native-svg：15.15.4，用于绘制手机禁食页的正圆和圆头状态弧线
 - React Native：0.86.2
 - React：19.2.3
@@ -41,6 +42,8 @@
 - 工程位置：`apps/mobile`
 
 当前手机工程从 MochiLedger 的 React Native CLI 基线迁移而来，现已采用 Expo Development Build。CNG 会用 `app.json`、已安装依赖和 `plugins/` 重建 `apps/mobile/android/`；该生成目录不提交，也不能保存唯一的重要业务代码。
+
+`expo-notifications` 是原生依赖。新增或调整它以后必须重新执行 Prebuild、构建并安装 Development Build，只刷新 Metro 不会把通知接收器和权限带进已安装应用。阶段 4 不加入 `SCHEDULE_EXACT_ALARM` 或 `USE_EXACT_ALARM`；Android 没有精确闹钟能力时使用非精确调度，所以产品只承诺在目标时间附近提醒。
 
 手机端 `pnpm-workspace.yaml` 会把 pnpm 虚拟依赖目录放在 `apps/mobile/.pnpm/`，并缩短内部文件夹名。这是 Windows 原生编译的路径保护；没有它，CMake 可能因依赖路径超过对象文件上限而反复生成 `build.ninja`，最终无法产出 APK。
 

@@ -6,6 +6,7 @@
 
 - “禁食 / 统计”双入口悬浮胶囊导航；
 - 按确认稿实现的禁食界面，以及可在 App 重开后恢复的真实 16 小时断食会话；
+- 由 Android 手机在目标时间附近安排并可提前取消的本地提醒；
 - 由 Expo Prebuild 生成的 Android 原生工程；
 - 公共页面外壳、主题、导航测试；
 - 字体和导航图片等静态资源。
@@ -48,6 +49,8 @@ pnpm test -- --runInBand
 - 目前以 Expo Development Build 为主，不使用 Expo Go 承载后续原生能力。
 - 统计页面只有占位内容。
 - 禁食页只保存当前活动会话，重新打开后继续根据原开始时间和计划结束时间计算，不保存每秒变化的倒计时。
-- 通知和 Wear OS 同步尚未实现。
+- 目标时间提醒不申请精确闹钟权限，因此可能受省电策略影响而延后，不承诺精确到秒。
+- 最近任务划掉、系统回收、设备重启和 force stop 的区别与阶段 4 实测状态见 `../../docs/manual-test-checklist.md`。
+- Wear OS 不自行安排同类提醒，手机—手表同步仍未实现。
 - Android applicationId 为 `com.zensoku.nutritime`；手机和手表的同类构建还必须使用匹配签名。
 - 当前 mobile versionCode 从 `1000001` 起步。

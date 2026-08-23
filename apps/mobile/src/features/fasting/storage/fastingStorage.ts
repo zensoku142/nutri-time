@@ -9,11 +9,17 @@ import type {FastingSession} from '../domain/fasting';
 export type PersistedFastingState = {
   storageVersion: 1;
   session: FastingSession;
+  // notification ID（系统给这条提醒的“取件号码”）只属于手机运行信息，结束断食时靠它找到并取消提醒。
+  completionNotificationId?: string;
 };
 
 export type FastingStateReadResult =
   | {status: 'empty'}
-  | {status: 'restored'; session: FastingSession}
+  | {
+      status: 'restored';
+      session: FastingSession;
+      state: PersistedFastingState;
+    }
   | {status: 'invalid'};
 
 const CURRENT_FASTING_STORAGE_KEY = '@nutritime/fasting/current';
@@ -51,7 +57,10 @@ function isValidPersistedState(
   // 每次恢复都重新检查版本、会话状态和时间，损坏记录才不会让 App 崩溃或冒充正常断食。
   return (
     value.storageVersion === CURRENT_STORAGE_VERSION &&
-    isValidFastingSession(value.session)
+    isValidFastingSession(value.session) &&
+    (value.completionNotificationId === undefined ||
+      (typeof value.completionNotificationId === 'string' &&
+        value.completionNotificationId.trim().length > 0))
   );
 }
 
@@ -70,7 +79,12 @@ export async function readCurrentFastingState(): Promise<FastingStateReadResult>
       return {status: 'invalid'};
     }
 
-    return {status: 'restored', session: parsedValue.session};
+    // 旧版记录没有提醒取件号码仍然合法；可选字段不会抬高 storageVersion，也不会破坏阶段 3 已保存的数据。
+    return {
+      status: 'restored',
+      session: parsedValue.session,
+      state: parsedValue,
+    };
   } catch {
     // 无法解析的原始文字继续留在手机中，只有用户明确重置时才删除，避免静默丢失可排查的信息。
     return {status: 'invalid'};
@@ -80,10 +94,14 @@ export async function readCurrentFastingState(): Promise<FastingStateReadResult>
 // ---------- 保存当前状态 ----------
 export async function saveCurrentFastingState(
   session: FastingSession,
+  completionNotificationId?: string,
 ): Promise<void> {
   const persistedState: PersistedFastingState = {
     storageVersion: CURRENT_STORAGE_VERSION,
     session,
+    ...(completionNotificationId === undefined
+      ? {}
+      : {completionNotificationId}),
   };
 
   await AsyncStorage.setItem(

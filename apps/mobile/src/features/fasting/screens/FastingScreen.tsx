@@ -26,10 +26,17 @@ import {
 } from '../domain/fasting';
 import type {FastingSession} from '../domain/fasting';
 import {
+  cancelFastingCompletionNotification,
+  isFastingCompletionNotificationScheduled,
+  requestFastingNotificationPermission,
+  scheduleFastingCompletionNotification,
+} from '../notifications/fastingNotifications';
+import {
   clearCurrentFastingState,
   readCurrentFastingState,
   saveCurrentFastingState,
 } from '../storage/fastingStorage';
+import type {PersistedFastingState} from '../storage/fastingStorage';
 
 // SVG（放大缩小后仍保持平滑的矢量画布）用同一套正方形坐标绘制圆环。
 // 绿色弧线根据时间戳算出的进度增长，页面刷新再慢也不会改变真实进度。
@@ -50,24 +57,88 @@ const IDLE_MARKER_Y =
   RING_RADIUS * Math.sin((RING_START_ANGLE * Math.PI) / 180);
 
 type RecoveryStatus = 'loading' | 'ready' | 'readError' | 'invalid';
+type ActiveMutation = 'starting' | 'ending' | 'resetting' | null;
+
+const REMINDER_UNAVAILABLE_MESSAGE =
+  '断食仍在进行，但提醒未启用。请留意计划结束时间。';
+const REMINDER_CANCEL_FAILED_MESSAGE =
+  '断食已结束，但旧提醒可能仍会出现，请在系统通知中忽略它。';
+
+function reportReminderError(action: string, error: unknown) {
+  // 诊断日志只记录失败步骤和错误种类，不记录会话时间或其他可能暴露用户习惯的数据。
+  const errorName = error instanceof Error ? error.name : 'UnknownError';
+  console.error(`[NutriTime] ${action}`, {errorName});
+}
+
+async function scheduleAndPersistCompletionReminder(
+  session: FastingSession,
+): Promise<string | null> {
+  try {
+    const permissionGranted = await requestFastingNotificationPermission();
+
+    if (!permissionGranted) {
+      return null;
+    }
+  } catch (error) {
+    reportReminderError('notification-permission-check-failed', error);
+    return null;
+  }
+
+  let notificationId: string;
+
+  try {
+    notificationId = await scheduleFastingCompletionNotification(
+      session.plannedEndAt,
+    );
+  } catch (error) {
+    reportReminderError('notification-schedule-failed', error);
+    return null;
+  }
+
+  try {
+    await saveCurrentFastingState(session, notificationId);
+    return notificationId;
+  } catch (error) {
+    reportReminderError('notification-id-save-failed', error);
+
+    // 提醒已经交给系统，但取件号码没写进手机小抽屉时，结束断食就再也找不到它。
+    // 因此这里马上撤销刚安排的提醒；即使撤销也失败，本地会话仍是主要结果，不能跟着回滚。
+    try {
+      await cancelFastingCompletionNotification(notificationId);
+    } catch (cancelError) {
+      reportReminderError(
+        'notification-compensation-cancel-failed',
+        cancelError,
+      );
+    }
+
+    return null;
+  }
+}
 
 export function FastingScreen() {
-  // useState（组件自己的小记事本）保存已经确认写入手机的会话，以及页面上一次读取到的系统时间。
-  const [session, setSession] = useState<FastingSession | null>(null);
+  // useState（组件自己的小记事本）保存已经确认写入手机的会话和提醒取件号码，以及页面上一次读取到的系统时间。
+  const [persistedState, setPersistedState] =
+    useState<PersistedFastingState | null>(null);
   const [now, setNow] = useState(0);
   const [recoveryStatus, setRecoveryStatus] =
     useState<RecoveryStatus>('loading');
-  const [isMutating, setIsMutating] = useState(false);
+  const [activeMutation, setActiveMutation] =
+    useState<ActiveMutation>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
+  const [reminderNotice, setReminderNotice] = useState<string | null>(null);
   const isMutatingRef = useRef(false);
   const recoveryRequestIdRef = useRef(0);
   const isMountedRef = useRef(true);
+  const session = persistedState?.session ?? null;
+  const isMutating = activeMutation !== null;
 
   const restoreCurrentSession = useCallback(async () => {
     const requestId = recoveryRequestIdRef.current + 1;
     recoveryRequestIdRef.current = requestId;
     setRecoveryStatus('loading');
     setOperationError(null);
+    setReminderNotice(null);
 
     try {
       const storedState = await readCurrentFastingState();
@@ -78,23 +149,71 @@ export function FastingScreen() {
       }
 
       if (storedState.status === 'invalid') {
-        setSession(null);
+        setPersistedState(null);
         setRecoveryStatus('invalid');
         return;
       }
 
       if (storedState.status === 'restored') {
         // 恢复时保留原开始和结束时间，只读取此刻时间刷新页面，不能凭空创建一段新断食。
-        setNow(Date.now());
-        setSession(storedState.session);
+        const restoreNow = Date.now();
+        let restoredState = storedState.state;
+        setNow(restoreNow);
+        setPersistedState(restoredState);
+
+        if (storedState.session.plannedEndAt > restoreNow) {
+          let shouldScheduleReminder =
+            restoredState.completionNotificationId === undefined;
+
+          if (restoredState.completionNotificationId !== undefined) {
+            try {
+              shouldScheduleReminder =
+                !(await isFastingCompletionNotificationScheduled(
+                  restoredState.completionNotificationId,
+                ));
+            } catch (error) {
+              if (requestId !== recoveryRequestIdRef.current) {
+                return;
+              }
+
+              // 查询失败时无法判断原提醒是否还在；此时不冒险再排一条，避免用户收到两次相同提醒。
+              reportReminderError('notification-recovery-check-failed', error);
+              setReminderNotice(REMINDER_UNAVAILABLE_MESSAGE);
+              shouldScheduleReminder = false;
+            }
+
+            if (requestId !== recoveryRequestIdRef.current) {
+              return;
+            }
+          }
+
+          if (shouldScheduleReminder) {
+            const notificationId =
+              await scheduleAndPersistCompletionReminder(storedState.session);
+
+            if (requestId !== recoveryRequestIdRef.current) {
+              return;
+            }
+
+            if (notificationId === null) {
+              setReminderNotice(REMINDER_UNAVAILABLE_MESSAGE);
+            } else {
+              restoredState = {
+                ...restoredState,
+                completionNotificationId: notificationId,
+              };
+              setPersistedState(restoredState);
+            }
+          }
+        }
       } else {
-        setSession(null);
+        setPersistedState(null);
       }
 
       setRecoveryStatus('ready');
     } catch {
       if (requestId === recoveryRequestIdRef.current) {
-        setSession(null);
+        setPersistedState(null);
         setRecoveryStatus('readError');
       }
     }
@@ -187,14 +306,17 @@ export function FastingScreen() {
       return;
     }
 
-    // isMutating 表示按钮处理期间暂时禁止再次点击，避免创建两个会话或让先完成的旧操作覆盖新状态。
+    const isStarting = persistedState === null;
+
+    // isMutating 表示按钮处理期间暂时禁止再次点击，避免创建两个会话、两条提醒或让先完成的旧操作覆盖新状态。
     // ref 会立即上锁；即使 React 还没来得及重画禁用按钮，第二次快速点击也会被挡住。
     isMutatingRef.current = true;
-    setIsMutating(true);
+    setActiveMutation(isStarting ? 'starting' : 'ending');
     setOperationError(null);
+    setReminderNotice(null);
 
     try {
-      if (session === null) {
+      if (isStarting) {
         // Date.now() 只在用户点击和系统刷新这类边界读取；核心计算拿到固定参数后不会自己读取时钟。
         const startNow = Date.now();
         const nextSession = createFastingSession(startNow);
@@ -204,20 +326,52 @@ export function FastingScreen() {
 
         if (isMountedRef.current) {
           setNow(startNow);
-          setSession(nextSession);
+          setPersistedState({storageVersion: 1, session: nextSession});
+        }
+
+        // 本地会话是用户点击开始后的主要结果，提醒只是辅助能力；后面的权限或系统通知失败都不能取消断食。
+        const notificationId =
+          await scheduleAndPersistCompletionReminder(nextSession);
+
+        if (isMountedRef.current) {
+          if (notificationId === null) {
+            setReminderNotice(REMINDER_UNAVAILABLE_MESSAGE);
+          } else {
+            setPersistedState({
+              storageVersion: 1,
+              session: nextSession,
+              completionNotificationId: notificationId,
+            });
+          }
         }
       } else {
+        // 清除前先拿出提醒取件号码；本地记录删掉后就不能再从手机小抽屉里找回它。
+        const notificationId = persistedState.completionNotificationId;
+
         // 结束同样先清手机记录；清除失败时保留页面会话，重开 App 也仍能继续这次断食。
         await clearCurrentFastingState();
 
         if (isMountedRef.current) {
-          setSession(null);
+          setPersistedState(null);
+        }
+
+        if (notificationId !== undefined) {
+          try {
+            // 本地清除已经成功，取消提醒失败也不能把用户明确结束的会话恢复回来。
+            await cancelFastingCompletionNotification(notificationId);
+          } catch (error) {
+            reportReminderError('notification-cancel-failed', error);
+
+            if (isMountedRef.current) {
+              setReminderNotice(REMINDER_CANCEL_FAILED_MESSAGE);
+            }
+          }
         }
       }
     } catch {
       if (isMountedRef.current) {
         setOperationError(
-          session === null
+          isStarting
             ? '断食状态保存失败，本次断食尚未开始，请重试。'
             : '本地状态清除失败，本次断食仍在继续，请重试。',
         );
@@ -226,7 +380,7 @@ export function FastingScreen() {
       isMutatingRef.current = false;
 
       if (isMountedRef.current) {
-        setIsMutating(false);
+        setActiveMutation(null);
       }
     }
   };
@@ -242,7 +396,7 @@ export function FastingScreen() {
     }
 
     isMutatingRef.current = true;
-    setIsMutating(true);
+    setActiveMutation('resetting');
     setOperationError(null);
 
     try {
@@ -260,7 +414,7 @@ export function FastingScreen() {
       isMutatingRef.current = false;
 
       if (isMountedRef.current) {
-        setIsMutating(false);
+        setActiveMutation(null);
       }
     }
   };
@@ -321,11 +475,12 @@ export function FastingScreen() {
     );
   }
 
-  const displayedActionLabel = isMutating
-    ? isFasting
-      ? '正在结束…'
-      : '正在开始…'
-    : primaryActionLabel;
+  const displayedActionLabel =
+    activeMutation === 'starting'
+      ? '正在开始…'
+      : activeMutation === 'ending'
+        ? '正在结束…'
+        : primaryActionLabel;
 
   return (
     <SafeAreaView
@@ -448,6 +603,11 @@ export function FastingScreen() {
           {operationError === null ? null : (
             <Text accessibilityLiveRegion="polite" style={styles.errorText}>
               {operationError}
+            </Text>
+          )}
+          {reminderNotice === null ? null : (
+            <Text accessibilityLiveRegion="polite" style={styles.errorText}>
+              {reminderNotice}
             </Text>
           )}
         </View>

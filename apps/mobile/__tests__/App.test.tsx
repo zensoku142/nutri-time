@@ -19,7 +19,14 @@ jest.mock('../src/features/fasting/storage/fastingStorage', () => ({
   saveCurrentFastingState: jest.fn(),
 }));
 
-test('可以完成阶段 3 恢复并渲染禁食首页', async () => {
+// 完整入口只确认页面能启动；系统通知由通知模块和禁食页面测试分别使用可控替身验证。
+jest.mock('expo-notifications', () => ({
+  AndroidImportance: {DEFAULT: 5},
+  SchedulableTriggerInputTypes: {DATE: 'date'},
+  setNotificationHandler: jest.fn(),
+}));
+
+test('可以完成本地恢复并渲染禁食首页', async () => {
   let renderer: ReactTestRenderer.ReactTestRenderer;
 
   // act 会等 React 完成本轮页面更新，避免导航还没准备好，测试就提前检查结果。

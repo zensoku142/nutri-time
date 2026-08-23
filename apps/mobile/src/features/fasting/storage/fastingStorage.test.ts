@@ -39,7 +39,7 @@ test('没有本地数据时返回 empty', async () => {
   expect(asyncStorageMock.getItem).toHaveBeenCalledWith(STORAGE_KEY);
 });
 
-test('合法数据恢复原会话和时间戳', async () => {
+test('阶段 3 旧数据没有 notification ID 时仍恢复原会话', async () => {
   asyncStorageMock.getItem.mockResolvedValue(
     JSON.stringify({storageVersion: 1, session: VALID_SESSION}),
   );
@@ -47,6 +47,22 @@ test('合法数据恢复原会话和时间戳', async () => {
   await expect(readCurrentFastingState()).resolves.toEqual({
     status: 'restored',
     session: VALID_SESSION,
+    state: {storageVersion: 1, session: VALID_SESSION},
+  });
+});
+
+test('合法数据会一并恢复通知取件号码', async () => {
+  const storedState = {
+    storageVersion: 1 as const,
+    session: VALID_SESSION,
+    completionNotificationId: 'notification-1',
+  };
+  asyncStorageMock.getItem.mockResolvedValue(JSON.stringify(storedState));
+
+  await expect(readCurrentFastingState()).resolves.toEqual({
+    status: 'restored',
+    session: VALID_SESSION,
+    state: storedState,
   });
 });
 
@@ -59,6 +75,22 @@ test('保存时只写入版本和当前活动会话', async () => {
     STORAGE_KEY,
     JSON.stringify({storageVersion: 1, session: VALID_SESSION}),
   );
+});
+
+test('通知安排成功后把系统取件号码写在业务会话外层', async () => {
+  asyncStorageMock.setItem.mockResolvedValue();
+
+  await saveCurrentFastingState(VALID_SESSION, 'notification-1');
+
+  expect(asyncStorageMock.setItem).toHaveBeenCalledWith(
+    STORAGE_KEY,
+    JSON.stringify({
+      storageVersion: 1,
+      session: VALID_SESSION,
+      completionNotificationId: 'notification-1',
+    }),
+  );
+  expect(VALID_SESSION).not.toHaveProperty('completionNotificationId');
 });
 
 test('删除时只清理统一的当前会话 key', async () => {
@@ -129,6 +161,22 @@ test.each([
     JSON.stringify({
       storageVersion: 1,
       session: {...VALID_SESSION, plannedEndAt: VALID_SESSION.startAt},
+    }),
+  ],
+  [
+    '通知取件号码是空文字',
+    JSON.stringify({
+      storageVersion: 1,
+      session: VALID_SESSION,
+      completionNotificationId: '   ',
+    }),
+  ],
+  [
+    '通知取件号码不是文字',
+    JSON.stringify({
+      storageVersion: 1,
+      session: VALID_SESSION,
+      completionNotificationId: 123,
     }),
   ],
 ])('%s 时返回 invalid', async (_name, storedValue) => {
