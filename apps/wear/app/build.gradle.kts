@@ -10,10 +10,12 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.nutritimewear"
+        // applicationId 是系统识别已安装应用的唯一名字；两端相同后，Wear Data Layer 才能建立配对通道。
+        applicationId = "com.zensoku.nutritime"
         minSdk = 30
         targetSdk = 37
-        versionCode = 1
+        // 手表从 2000001 起使用独立编号区间，避免与同包名的手机安装包发生版本冲突。
+        versionCode = 2000001
         versionName = "1.0"
 
     }

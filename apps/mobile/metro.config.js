@@ -1,8 +1,6 @@
-const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
+const {getDefaultConfig} = require('expo/metro-config');
 
 // ==================== JavaScript 打包配置 ====================
-// Metro（把多个代码文件打成手机应用资源的工具）目前完全沿用 React Native 默认设置。
-// 保留空的自定义对象，今后确有特殊资源类型时可在这里追加，并继续与官方默认值合并。
-const config = {};
-
-module.exports = mergeConfig(getDefaultConfig(__dirname), config);
+// Metro（把多个代码文件打成手机应用资源的工具）改用 Expo 默认设置。
+// 这样 Development Build 能识别 Expo 模块，同时保留 React Native 原有的打包行为。
+module.exports = getDefaultConfig(__dirname);

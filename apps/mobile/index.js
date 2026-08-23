@@ -1,9 +1,8 @@
-// ==================== 原生注册入口 ====================
-// Android 或 iOS 启动后会先执行这个文件，再按 app.json 中的名称找到 App 组件。
+// ==================== Expo 应用入口 ====================
+// Development Build（包含项目原生能力的开发版应用）启动后会先执行这个文件。
 
-import { AppRegistry } from 'react-native';
+import {registerRootComponent} from 'expo';
 import App from './App';
-import { name as appName } from './app.json';
 
-// registerComponent（登记应用入口）必须保留，否则原生窗口不知道应显示哪一个 React 页面。
-AppRegistry.registerComponent(appName, () => App);
+// registerRootComponent（登记首页）同时照顾 Expo 和原生启动流程，避免两种入口名称不一致。
+registerRootComponent(App);

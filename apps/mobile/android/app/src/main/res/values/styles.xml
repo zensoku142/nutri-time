@@ -1,9 +1,0 @@
-<resources>
-
-    <!-- AppTheme 是所有 Android 原生窗口的基础外观，不显示系统自带标题栏。 -->
-    <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
-        <!-- 输入框沿用 React Native 修正后的背景，避免旧 Android 主题出现绘制崩溃。 -->
-        <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
-    </style>
-
-</resources>

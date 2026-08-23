@@ -1,9 +1,0 @@
-// ==================== Android 工程组成 ====================
-// Gradle（Android 的编译工具）先加载 React Native 插件，再自动发现已安装的原生依赖。
-pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
-plugins { id("com.facebook.react.settings") }
-extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
-// 工程名称和 app 模块共同决定 Android Studio 中显示、编译的项目范围。
-rootProject.name = 'NutriTime'
-include ':app'
-includeBuild('../node_modules/@react-native/gradle-plugin')

@@ -26,10 +26,11 @@ NutriTime/
 
 ## 当前状态
 
-- `apps/mobile` 已从 MochiLedger 迁移 React Native 0.86 导航基线。
+- `apps/mobile` 已从 React Native CLI 基线迁移到 Expo SDK 57 Development Build。
 - 只保留“禁食 / 统计”悬浮胶囊导航、最小占位页面、字体和静态资源。
 - 记账业务、API、请求缓存、详情、表单和个人中心没有迁移。
-- 手机工程当前仍是 React Native CLI 基线，尚未完成 Expo Development Build/CNG 转换。
+- 手机端采用 CNG（根据 `app.json` 持续生成原生工程）；`apps/mobile/android/` 不作为长期维护源码提交。
+- 手机与手表 applicationId 已统一为 `com.zensoku.nutritime`，版本号分别从 `1000001` 和 `2000001` 起。
 - `apps/wear` 已建立只显示 `NutriTime Wear` 的 Compose for Wear OS 最小模板，尚未加入断食业务或手机同步。
 
 ## 手机端运行
@@ -37,15 +38,18 @@ NutriTime/
 ```powershell
 Set-Location apps/mobile
 pnpm install
-pnpm start
+pnpm prebuild:android
+pnpm android -- --device <mobile-serial>
 ```
 
-另开终端：
+Development Build 已安装且原生依赖没有变化时，只需启动 Expo 的 Metro 开发服务器：
 
 ```powershell
 Set-Location apps/mobile
-pnpm android
+pnpm start
 ```
+
+完整环境、构建和指定设备启动命令见 [docs/environment.md](docs/environment.md)。
 
 ## 文档入口
 

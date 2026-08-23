@@ -1,0 +1,11 @@
+# 手机子工程单独管理依赖，不能把 React Native 包安装到仓库根目录或手表工程。
+packages:
+  - .
+
+# React Native 和 ESLint 需要从项目根目录找到间接依赖，因此继续使用扁平提升。
+shamefullyHoist: true
+
+# Windows 的 CMake 原生编译仍有较短的对象文件路径上限。
+# 把 pnpm 虚拟目录上移并缩短文件夹名，避免 Development Build 因路径过长反复生成 build.ninja。
+virtualStoreDir: .pnpm
+virtualStoreDirMaxLength: 40

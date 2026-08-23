@@ -1,22 +1,18 @@
-# Dependencies
+# 依赖
 node_modules/
 .pnpm-store/
+apps/mobile/.pnpm/
 
-# Expo and React Native generated output
+# Expo 与 React Native 生成内容
 apps/mobile/.expo/
 apps/mobile/dist/
+apps/mobile/android/
 coverage/
-apps/mobile/android/.gradle/
-apps/mobile/android/app/build/
-apps/mobile/android/build/
-apps/mobile/android/.cxx/
-apps/mobile/android/app/.cxx/
-apps/mobile/android/.kotlin/
 **/local.properties
 *.apk
 *.aab
 
-# Local development state
+# 本地开发状态
 .idea/
 .vscode/
 .bundle/
@@ -25,20 +21,21 @@ apps/mobile/android/.kotlin/
 *.hprof
 *.iml
 
-# Local environment and release credentials
+# 本地环境与发布凭据
 .env
 .env.*
 !.env.example
 *.jks
 *.keystore
-!apps/mobile/android/app/debug.keystore
+**/keystore.properties
+**/signing.properties
 *.p12
 *.pem
 *.mobileprovision
 
-# Keep only the approved fasting design set in the initial repository
+# 初始仓库只跟踪已经确认的断食设计稿
 design/fasting/*.png
 
-# Operating system files
+# 操作系统文件
 .DS_Store
 Thumbs.db

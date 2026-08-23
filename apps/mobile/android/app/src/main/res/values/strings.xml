@@ -1,4 +1,0 @@
-<resources>
-    <!-- app_name 会显示在桌面图标和系统任务列表中。 -->
-    <string name="app_name">NutriTime</string>
-</resources>

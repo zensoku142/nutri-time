@@ -12,7 +12,7 @@
 
 NutriTime 是一个 Android 手机与 Wear OS 轻断食计时项目，目前主要包含以下目录：
 
-- `apps/mobile/`：React Native + TypeScript 手机端；当前是从 MochiLedger 迁移的 React Native CLI 基线，后续转换为 Expo Development Build。
+- `apps/mobile/`：React Native + TypeScript + Expo Development Build 手机端；`android/` 由 Expo Prebuild 按配置生成。
 - `apps/wear/`：Kotlin + Jetpack Compose for Wear OS 工程位置，目前只有阶段说明。
 - `design/`：用户已确认的手机与手表视觉设计来源。
 - `docs/`：实施计划、产品范围、环境、签名、同步协议和测试文档。
@@ -21,7 +21,7 @@ NutriTime 是一个 Android 手机与 Wear OS 轻断食计时项目，目前主�
 
 ### 2.1 NutriTime 技术与产品边界
 
-1. 手机长期路线为 React Native + TypeScript + Expo Development Build；完成转换前不得声称当前 CLI 基线已经采用 Expo/CNG。
+1. 手机端已经采用 React Native + TypeScript + Expo Development Build；不得退回以 React Native CLI 或 Expo Go 为主的开发方式。
 2. `apps/mobile/android/` 后续由 Expo Prebuild 生成，不得成为重要 Kotlin 业务逻辑的唯一保存位置。
 3. Wear Data Layer 原生逻辑必须放在 `apps/mobile/modules/wear-data-layer/` 本地 Expo Module；Manifest 和权限优先使用 app config、官方配置或 config plugin。
 4. 阶段 7 前只实现 16 小时断食闭环；8 小时进食窗口属于阶段 8。阶段 8 前 README 必须明确当前不是完整 16:8 周期。
@@ -29,6 +29,7 @@ NutriTime 是一个 Android 手机与 Wear OS 轻断食计时项目，目前主�
 6. 第一阶段手机是唯一真相来源。手表遇到未知或非法协议时保留 last good state 并显示错误，不得静默回到 idle。
 7. 不提前加入后端、登录、历史、Tile、卡路里、体重、双向同步或冲突框架。
 8. Release 密钥、密码、令牌和私有凭据不得提交。Debug keystore 只能用于本地调试。
+9. 手机和手表 applicationId 固定为 `com.zensoku.nutritime`；mobile versionCode 从 `1000001` 起，wear 从 `2000001` 起。
 
 ## 3. 核心目标与优先级
 
