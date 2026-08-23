@@ -12,7 +12,7 @@ jest.mock('react-native-safe-area-context', () =>
   jest.requireActual('react-native-safe-area-context/jest/mock').default,
 );
 
-test('可以渲染阶段 1 禁食首页', async () => {
+test('可以渲染阶段 2 禁食首页', async () => {
   let renderer: ReactTestRenderer.ReactTestRenderer;
 
   // act 会等 React 完成本轮页面更新，避免导航还没准备好，测试就提前检查结果。
