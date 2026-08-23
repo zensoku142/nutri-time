@@ -1,17 +1,33 @@
 // ==================== Wear 原生模块入口 ====================
 // Expo Module（连接两种代码的小桥）让负责手机页面的 TypeScript 可以调用 Android 的 Kotlin 能力。
-// 这座桥只在开发者主动测试时加载；若 Development Build 没有重建，断食、存储和通知功能仍可正常启动。
+// 正式断食流程只在本地状态保存或恢复成功后调用这座桥；原生同步失败不会改变手机里的断食结果。
 
 import {requireNativeModule} from 'expo';
 import type {NativeModule} from 'expo';
 
 type WearDataLayerNativeModule = NativeModule & {
   ping(): Promise<string>;
-  sendTestSnapshot(): Promise<void>;
+  syncCurrentFasting(payload: WearSyncPayload, urgent: boolean): Promise<void>;
 };
 
+// 判别联合会根据 status 限定合法字段：idle 不能夹带空会话，fasting 则必须带齐真实会话。
+export type WearSyncPayload =
+  | {
+      protocolVersion: 1;
+      status: 'idle';
+      stateChangedAt: number;
+    }
+  | {
+      protocolVersion: 1;
+      status: 'fasting';
+      sessionId: string;
+      startAt: number;
+      plannedEndAt: number;
+      stateChangedAt: number;
+    };
+
 function getNativeModule() {
-  // 只在用户点击时寻找原生模块；找不到时错误会落在本次 Promise 中，不会让应用启动失败。
+  // 只在实际诊断或同步时寻找原生模块；找不到时错误会落在本次 Promise 中，不会在 render 阶段让应用崩溃。
   return requireNativeModule<WearDataLayerNativeModule>('WearDataLayer');
 }
 
@@ -21,8 +37,11 @@ export async function ping(): Promise<string> {
   return getNativeModule().ping();
 }
 
-// Data Layer（手机和手表之间的共享小信箱）只接收 Kotlin 创建的固定诊断快照。
-// TypeScript 不传用户真实会话，避免阶段 6B 提前接入正式断食流程。
-export async function sendTestSnapshot(): Promise<void> {
-  return getNativeModule().sendTestSnapshot();
+// Data Layer（手机和手表之间的共享小信箱）保存最新状态快照，不传每秒变化的剩余时间。
+// urgent 只有用户主动开始或结束时为 true；启动恢复传 false，避免普通核对增加设备耗电。
+export async function syncCurrentFasting(
+  payload: WearSyncPayload,
+  urgent: boolean,
+): Promise<void> {
+  return getNativeModule().syncCurrentFasting(payload, urgent);
 }

@@ -3,7 +3,7 @@
 
 import {requireNativeModule} from 'expo';
 
-import {ping, sendTestSnapshot} from './index';
+import {ping, syncCurrentFasting} from './index';
 
 jest.mock('expo', () => ({
   requireNativeModule: jest.fn(),
@@ -35,18 +35,60 @@ test('原生模块没有装进 Development Build 时通过 Promise 明确失败'
   await expect(ping()).rejects.toThrow('native module missing');
 });
 
-test('sendTestSnapshot 返回 Promise 且不向 Kotlin 传真实断食数据', async () => {
-  const nativeSendTestSnapshot = jest.fn(() => Promise.resolve());
+test('idle 只把正式公共字段交给 Kotlin，不传 session 空值', async () => {
+  const nativeSyncCurrentFasting = jest.fn(() => Promise.resolve());
   requireNativeModuleMock.mockReturnValue({
     ping: jest.fn(),
-    sendTestSnapshot: nativeSendTestSnapshot,
+    syncCurrentFasting: nativeSyncCurrentFasting,
   });
+  const payload = {
+    protocolVersion: 1,
+    status: 'idle',
+    stateChangedAt: 1_787_371_200_000,
+  } as const;
 
-  const result = sendTestSnapshot();
+  const result = syncCurrentFasting(payload, true);
 
   expect(result).toBeInstanceOf(Promise);
   await expect(result).resolves.toBeUndefined();
   expect(requireNativeModuleMock).toHaveBeenCalledWith('WearDataLayer');
-  expect(nativeSendTestSnapshot).toHaveBeenCalledWith();
-  expect(nativeSendTestSnapshot).toHaveBeenCalledTimes(1);
+  expect(nativeSyncCurrentFasting).toHaveBeenCalledWith(payload, true);
+  expect(Object.keys(payload)).toEqual([
+    'protocolVersion',
+    'status',
+    'stateChangedAt',
+  ]);
+  expect(payload).not.toHaveProperty('sessionId');
+  expect(payload).not.toHaveProperty('startAt');
+  expect(payload).not.toHaveProperty('plannedEndAt');
+  expect(payload).not.toHaveProperty('remainingSeconds');
+});
+
+test('fasting 把完整真实会话和普通发送标记交给 Kotlin', async () => {
+  const nativeSyncCurrentFasting = jest.fn(() => Promise.resolve());
+  requireNativeModuleMock.mockReturnValue({
+    ping: jest.fn(),
+    syncCurrentFasting: nativeSyncCurrentFasting,
+  });
+  const payload = {
+    protocolVersion: 1,
+    status: 'fasting',
+    sessionId: 'fasting-1787313600000',
+    startAt: 1_787_313_600_000,
+    plannedEndAt: 1_787_371_200_000,
+    stateChangedAt: 1_787_313_600_000,
+  } as const;
+
+  await syncCurrentFasting(payload, false);
+
+  expect(nativeSyncCurrentFasting).toHaveBeenCalledWith(payload, false);
+  expect(Object.keys(payload)).toEqual([
+    'protocolVersion',
+    'status',
+    'sessionId',
+    'startAt',
+    'plannedEndAt',
+    'stateChangedAt',
+  ]);
+  expect(payload).not.toHaveProperty('remainingSeconds');
 });

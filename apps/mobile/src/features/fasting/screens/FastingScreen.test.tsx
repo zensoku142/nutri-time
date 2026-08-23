@@ -6,6 +6,7 @@ import React from 'react';
 import {AppState, StyleSheet} from 'react-native';
 import ReactTestRenderer from 'react-test-renderer';
 
+import {syncCurrentFasting} from '../../../../modules/wear-data-layer';
 import {theme} from '../../../app/theme';
 import type {FastingSession} from '../domain/fasting';
 import {
@@ -39,6 +40,10 @@ jest.mock('../notifications/fastingNotifications', () => ({
   scheduleFastingCompletionNotification: jest.fn(),
 }));
 
+jest.mock('../../../../modules/wear-data-layer', () => ({
+  syncCurrentFasting: jest.fn(),
+}));
+
 const clearCurrentFastingStateMock =
   clearCurrentFastingState as jest.MockedFunction<
     typeof clearCurrentFastingState
@@ -67,6 +72,7 @@ const scheduleFastingCompletionNotificationMock =
   scheduleFastingCompletionNotification as jest.MockedFunction<
     typeof scheduleFastingCompletionNotification
   >;
+const syncCurrentFastingMock = jest.mocked(syncCurrentFasting);
 
 const FIXED_NOW = new Date(2026, 7, 23, 20, 0, 0).getTime();
 const DEFAULT_FASTING_MS = 16 * 60 * 60 * 1000;
@@ -148,6 +154,7 @@ beforeEach(() => {
   );
   isFastingCompletionNotificationScheduledMock.mockResolvedValue(true);
   cancelFastingCompletionNotificationMock.mockResolvedValue();
+  syncCurrentFastingMock.mockResolvedValue();
 });
 
 afterEach(() => {
@@ -209,6 +216,17 @@ test('合法数据恢复为 fasting 并保留原开始和结束时间', async ()
   expect(getRenderedText(renderer)).toContain('08/24 12:00');
   expect(getRenderedText(renderer)).toContain('还剩 16:00:00');
   expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+  expect(syncCurrentFastingMock).toHaveBeenCalledWith(
+    {
+      protocolVersion: 1,
+      status: 'fasting',
+      sessionId: VALID_SESSION.id,
+      startAt: VALID_SESSION.startAt,
+      plannedEndAt: VALID_SESSION.plannedEndAt,
+      stateChangedAt: VALID_SESSION.startAt,
+    },
+    false,
+  );
 
   ReactTestRenderer.act(() => renderer.unmount());
   expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
@@ -327,6 +345,7 @@ test('普通重渲染不会再次核对或安排提醒', async () => {
   expect(readCurrentFastingStateMock).toHaveBeenCalledTimes(1);
   expect(scheduleFastingCompletionNotificationMock).toHaveBeenCalledTimes(1);
   expect(saveCurrentFastingStateMock).toHaveBeenCalledTimes(1);
+  expect(syncCurrentFastingMock).toHaveBeenCalledTimes(1);
 
   ReactTestRenderer.act(() => renderer.unmount());
 });
@@ -392,6 +411,17 @@ test('开始时先保存，保存成功后页面才进入 fasting', async () => 
   expect(getRenderedText(renderer)).toContain('还剩 16:00:00');
   expect(requestFastingNotificationPermissionMock).toHaveBeenCalledTimes(1);
   expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+  expect(syncCurrentFastingMock).toHaveBeenCalledWith(
+    {
+      protocolVersion: 1,
+      status: 'fasting',
+      sessionId: VALID_SESSION.id,
+      startAt: VALID_SESSION.startAt,
+      plannedEndAt: VALID_SESSION.plannedEndAt,
+      stateChangedAt: FIXED_NOW,
+    },
+    true,
+  );
 
   const activeArc = renderer.root.findByProps({
     stroke: theme.colors.fastingActive,
@@ -417,6 +447,7 @@ test('保存失败时保持 idle 并显示明确错误', async () => {
     '断食状态保存失败，本次断食尚未开始，请重试。',
   );
   expect(setIntervalSpy).not.toHaveBeenCalled();
+  expect(syncCurrentFastingMock).not.toHaveBeenCalled();
 
   ReactTestRenderer.act(() => renderer.unmount());
 });
@@ -484,8 +515,34 @@ test('通知安排失败时不回滚已保存的会话', async () => {
   expect(getRenderedText(renderer)).toContain('提醒未启用');
   expect(saveCurrentFastingStateMock).toHaveBeenCalledTimes(1);
   expect(clearCurrentFastingStateMock).not.toHaveBeenCalled();
+  expect(syncCurrentFastingMock).toHaveBeenCalledWith(
+    expect.objectContaining({status: 'fasting'}),
+    true,
+  );
   expect(consoleErrorSpy).toHaveBeenCalledWith(
     '[NutriTime] notification-schedule-failed',
+    {errorName: 'Error'},
+  );
+
+  ReactTestRenderer.act(() => renderer.unmount());
+});
+
+test('同步失败时不回滚手机已经保存的 fasting', async () => {
+  const consoleErrorSpy = jest
+    .spyOn(console, 'error')
+    .mockImplementation(() => undefined);
+  syncCurrentFastingMock.mockRejectedValue(new Error('data layer failed'));
+  const renderer = await renderScreen();
+
+  pressButton(renderer, '开始断食');
+  await flushPromises();
+
+  expect(getRenderedText(renderer)).toContain('断食进行中');
+  expect(getRenderedText(renderer)).not.toContain('断食状态保存失败');
+  expect(saveCurrentFastingStateMock).toHaveBeenCalledWith(VALID_SESSION);
+  expect(clearCurrentFastingStateMock).not.toHaveBeenCalled();
+  expect(consoleErrorSpy).toHaveBeenCalledWith(
+    '[NutriTime] wear-current-fasting-submit-failed',
     {errorName: 'Error'},
   );
 
@@ -542,6 +599,14 @@ test('结束时先删除，删除成功后页面才进入 idle', async () => {
 
   expect(getRenderedText(renderer)).toContain('尚未开始');
   expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
+  expect(syncCurrentFastingMock).toHaveBeenLastCalledWith(
+    {
+      protocolVersion: 1,
+      status: 'idle',
+      stateChangedAt: FIXED_NOW,
+    },
+    true,
+  );
 
   ReactTestRenderer.act(() => renderer.unmount());
 });
@@ -600,6 +665,10 @@ test('取消提醒失败时仍保持 idle，并显示非阻塞提示', async () 
   expect(getRenderedText(renderer)).toContain('尚未开始');
   expect(getRenderedText(renderer)).toContain('旧提醒可能仍会出现');
   expect(clearCurrentFastingStateMock).toHaveBeenCalledTimes(1);
+  expect(syncCurrentFastingMock).toHaveBeenLastCalledWith(
+    expect.objectContaining({status: 'idle'}),
+    true,
+  );
 
   ReactTestRenderer.act(() => renderer.unmount());
 });
@@ -618,6 +687,11 @@ test('删除失败时保留 fasting 并显示明确错误', async () => {
     '本地状态清除失败，本次断食仍在继续，请重试。',
   );
   expect(clearIntervalSpy).not.toHaveBeenCalled();
+  expect(
+    syncCurrentFastingMock.mock.calls.some(
+      ([payload]) => payload.status === 'idle',
+    ),
+  ).toBe(false);
 
   ReactTestRenderer.act(() => renderer.unmount());
 });
@@ -745,6 +819,7 @@ test('interval 每秒只刷新时间，不会再次持久化', async () => {
     isFastingCompletionNotificationScheduledMock.mock.calls.length;
   const cancelCallCount =
     cancelFastingCompletionNotificationMock.mock.calls.length;
+  const syncCallCount = syncCurrentFastingMock.mock.calls.length;
 
   ReactTestRenderer.act(() => {
     jest.advanceTimersByTime(5000);
@@ -765,6 +840,7 @@ test('interval 每秒只刷新时间，不会再次持久化', async () => {
   expect(cancelFastingCompletionNotificationMock).toHaveBeenCalledTimes(
     cancelCallCount,
   );
+  expect(syncCurrentFastingMock).toHaveBeenCalledTimes(syncCallCount);
 
   ReactTestRenderer.act(() => renderer.unmount());
 });

@@ -13,7 +13,6 @@ jest.mock('react-native-safe-area-context', () =>
 // Jest 没有 Android 原生环境，这里只隔离模块加载；真实 ping 仍由 Development Build 和 Logcat 验证。
 jest.mock('../../../../modules/wear-data-layer', () => ({
   ping: jest.fn(),
-  sendTestSnapshot: jest.fn(),
 }));
 
 const ORIGINAL_DEV_VALUE = __DEV__;
@@ -47,8 +46,8 @@ test('开发包显示主动测试原生模块的入口', () => {
     renderer.root.findByProps({accessibilityLabel: '测试 Wear 原生模块'}),
   ).toBeDefined();
   expect(
-    renderer.root.findByProps({accessibilityLabel: '发送测试快照'}),
-  ).toBeDefined();
+    renderer.root.findAllByProps({accessibilityLabel: '发送测试快照'}),
+  ).toHaveLength(0);
 });
 
 test('Release 条件下不显示原生模块调试入口', () => {

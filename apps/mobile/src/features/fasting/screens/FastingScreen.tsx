@@ -14,6 +14,10 @@ import {
 import {SafeAreaView} from 'react-native-safe-area-context';
 import Svg, {Circle} from 'react-native-svg';
 
+import {
+  syncCurrentFasting,
+  type WearSyncPayload,
+} from '../../../../modules/wear-data-layer';
 import {theme} from '../../../app/theme';
 import {
   createFastingSession,
@@ -68,6 +72,21 @@ function reportReminderError(action: string, error: unknown) {
   // 诊断日志只记录失败步骤和错误种类，不记录会话时间或其他可能暴露用户习惯的数据。
   const errorName = error instanceof Error ? error.name : 'UnknownError';
   console.error(`[NutriTime] ${action}`, {errorName});
+}
+
+async function submitCurrentFastingToWear(
+  payload: WearSyncPayload,
+  urgent: boolean,
+) {
+  try {
+    await syncCurrentFasting(payload, urgent);
+  } catch (error) {
+    // 手机本地记录已经是最终结果；共享信箱暂时不可用时只留下错误种类，不能撤销用户的开始或结束。
+    const errorName = error instanceof Error ? error.name : 'UnknownError';
+    console.error('[NutriTime] wear-current-fasting-submit-failed', {
+      errorName,
+    });
+  }
 }
 
 async function scheduleAndPersistCompletionReminder(
@@ -205,6 +224,23 @@ export function FastingScreen() {
               setPersistedState(restoredState);
             }
           }
+        }
+
+        // 启动恢复只是把手机已有真相放回共享信箱，不是用户的新操作，因此使用普通 DataItem。
+        await submitCurrentFastingToWear(
+          {
+            protocolVersion: 1,
+            status: 'fasting',
+            sessionId: storedState.session.id,
+            startAt: storedState.session.startAt,
+            plannedEndAt: storedState.session.plannedEndAt,
+            stateChangedAt: storedState.session.startAt,
+          },
+          false,
+        );
+
+        if (requestId !== recoveryRequestIdRef.current) {
+          return;
         }
       } else {
         setPersistedState(null);
@@ -344,12 +380,27 @@ export function FastingScreen() {
             });
           }
         }
+
+        // 通知是辅助能力；无论权限被拒绝还是安排失败，都要在本地保存成功后提交真实 fasting 快照。
+        await submitCurrentFastingToWear(
+          {
+            protocolVersion: 1,
+            status: 'fasting',
+            sessionId: nextSession.id,
+            startAt: nextSession.startAt,
+            plannedEndAt: nextSession.plannedEndAt,
+            stateChangedAt: startNow,
+          },
+          true,
+        );
       } else {
         // 清除前先拿出提醒取件号码；本地记录删掉后就不能再从手机小抽屉里找回它。
         const notificationId = persistedState.completionNotificationId;
 
         // 结束同样先清手机记录；清除失败时保留页面会话，重开 App 也仍能继续这次断食。
         await clearCurrentFastingState();
+        // idle 的变化时间在本地清除刚成功时固定下来；后续取消系统提醒即使很慢，也不能把业务结束时间推迟。
+        const idleStateChangedAt = Date.now();
 
         if (isMountedRef.current) {
           setPersistedState(null);
@@ -367,6 +418,15 @@ export function FastingScreen() {
             }
           }
         }
+        // 清除成功已经让手机回到 idle；旧提醒即使取消失败，也必须继续把这次结束提交到共享信箱。
+        await submitCurrentFastingToWear(
+          {
+            protocolVersion: 1,
+            status: 'idle',
+            stateChangedAt: idleStateChangedAt,
+          },
+          true,
+        );
       }
     } catch {
       if (isMountedRef.current) {

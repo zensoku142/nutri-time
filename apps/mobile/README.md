@@ -51,6 +51,6 @@ pnpm test -- --runInBand
 - 禁食页只保存当前活动会话，重新打开后继续根据原开始时间和计划结束时间计算，不保存每秒变化的倒计时。
 - 目标时间提醒不申请精确闹钟权限，因此可能受省电策略影响而延后，不承诺精确到秒。
 - 最近任务划掉、系统回收、设备重启和 force stop 的区别与阶段 4 实测状态见 `../../docs/manual-test-checklist.md`。
-- Wear OS 不自行安排同类提醒，手机—手表同步仍未实现。
+- Wear OS 不自行安排同类提醒；手机正式发送已接入，Wear 接收、协议错误处理和真实联调仍未完成。
 - Android applicationId 为 `com.zensoku.nutritime`；手机和手表的同类构建还必须使用匹配签名。
 - 当前 mobile versionCode 从 `1000001` 起步。
