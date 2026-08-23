@@ -25,5 +25,5 @@ test('可以渲染基础应用和首页', async () => {
   expect(renderedTree).toContain('禁食');
 
   // 首页通过共享 Screen 组件读取全局背景色；检查真实渲染结果可防止主题变量被误改。
-  expect(renderedTree).toContain('#FFFFFF');
+  expect(renderedTree).toContain('#F4F4F4');
 });

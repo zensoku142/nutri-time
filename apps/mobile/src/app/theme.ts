@@ -5,7 +5,7 @@
 export const theme = {
   colors: {
     // background 是页面底布，surface 是盖在上面的卡片；两者分开才能看出内容层次。
-    background: '#FFFFFF',
+    background: '#F4F4F4',
     surface: '#F6F6F4',
     text: '#1F2423',
     textSecondary: '#6B7270',
