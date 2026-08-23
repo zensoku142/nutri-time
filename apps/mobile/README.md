@@ -5,7 +5,7 @@
 当前工程从 MochiLedger 的 React Native 0.86 导航基础迁移而来，并已接入 Expo SDK 57 Development Build。目前包含：
 
 - “禁食 / 统计”双入口悬浮胶囊导航；
-- 按确认稿实现的禁食界面，以及只保存在当前内存中的真实 16 小时断食会话；
+- 按确认稿实现的禁食界面，以及可在 App 重开后恢复的真实 16 小时断食会话；
 - 由 Expo Prebuild 生成的 Android 原生工程；
 - 公共页面外壳、主题、导航测试；
 - 字体和导航图片等静态资源。
@@ -47,7 +47,7 @@ pnpm test -- --runInBand
 
 - 目前以 Expo Development Build 为主，不使用 Expo Go 承载后续原生能力。
 - 统计页面只有占位内容。
-- 禁食页根据开始和计划结束时间戳显示已进行与剩余时间，重新加载后仍会回到未开始。
-- 本地保存、通知和 Wear OS 同步尚未实现。
+- 禁食页只保存当前活动会话，重新打开后继续根据原开始时间和计划结束时间计算，不保存每秒变化的倒计时。
+- 通知和 Wear OS 同步尚未实现。
 - Android applicationId 为 `com.zensoku.nutritime`；手机和手表的同类构建还必须使用匹配签名。
 - 当前 mobile versionCode 从 `1000001` 起步。

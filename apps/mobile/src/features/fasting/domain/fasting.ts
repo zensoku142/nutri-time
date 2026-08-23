@@ -21,7 +21,7 @@ export function createFastingSession(
   durationMinutes = DEFAULT_FASTING_MINUTES,
 ): FastingSession {
   // Unix 毫秒时间戳表示从统一起点累计的毫秒数。手机和手表以后都用这个单位，才不会把秒和毫秒混在一起。
-  // 阶段 2 同时只会有一个内存会话，用开始时间组成 ID 已足够，也不需要为此增加第三方依赖。
+  // 第一阶段同一时间只允许一个活动会话，用开始时间组成 ID 已足够，也不需要为此增加第三方依赖。
   return {
     id: `fasting-${now}`,
     status: 'fasting',

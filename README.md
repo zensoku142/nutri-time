@@ -27,7 +27,7 @@ NutriTime/
 ## 当前状态
 
 - `apps/mobile` 已从 React Native CLI 基线迁移到 Expo SDK 57 Development Build。
-- 已按确认稿完成手机禁食页的阶段 2 时间逻辑，可在内存中开始或结束真实的 16 小时断食会话；统计页仍是占位页面。
+- 已完成手机禁食页的阶段 3 本地恢复：开始与结束会先确认手机存储成功，活动会话可在 App 重开后按原时间戳继续；统计页仍是占位页面。
 - 记账业务、API、请求缓存、详情、表单和个人中心没有迁移。
 - 手机端采用 CNG（根据 `app.json` 持续生成原生工程）；`apps/mobile/android/` 不作为长期维护源码提交。
 - 手机与手表 applicationId 已统一为 `com.zensoku.nutritime`，版本号分别从 `1000001` 和 `2000001` 起。

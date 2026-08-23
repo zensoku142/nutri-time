@@ -12,12 +12,20 @@ jest.mock('react-native-safe-area-context', () =>
   jest.requireActual('react-native-safe-area-context/jest/mock').default,
 );
 
-test('可以渲染阶段 2 禁食首页', async () => {
+// 完整入口测试不碰真实手机存储；空抽屉替身让页面完成启动恢复后再检查首页。
+jest.mock('../src/features/fasting/storage/fastingStorage', () => ({
+  clearCurrentFastingState: jest.fn(),
+  readCurrentFastingState: jest.fn(() => Promise.resolve({status: 'empty'})),
+  saveCurrentFastingState: jest.fn(),
+}));
+
+test('可以完成阶段 3 恢复并渲染禁食首页', async () => {
   let renderer: ReactTestRenderer.ReactTestRenderer;
 
   // act 会等 React 完成本轮页面更新，避免导航还没准备好，测试就提前检查结果。
-  await ReactTestRenderer.act(() => {
+  await ReactTestRenderer.act(async () => {
     renderer = ReactTestRenderer.create(<App />);
+    await Promise.resolve();
   });
 
   // 品牌和主按钮都来自真实首屏，能证明 App 不只是创建了空 Provider 或导航占位。

@@ -1,7 +1,7 @@
 // ==================== 禁食页面 ====================
-// 页面按已确认的手机设计稿展示 16 小时断食计划，会话仍只保存在本次打开期间的内存中。
+// 页面按已确认的手机设计稿展示 16 小时断食计划，并在启动时恢复手机里保存的当前会话。
 
-import {useEffect, useState} from 'react';
+import {useCallback, useEffect, useRef, useState} from 'react';
 import {
   AppState,
   Pressable,
@@ -25,6 +25,11 @@ import {
   getRemainingMs,
 } from '../domain/fasting';
 import type {FastingSession} from '../domain/fasting';
+import {
+  clearCurrentFastingState,
+  readCurrentFastingState,
+  saveCurrentFastingState,
+} from '../storage/fastingStorage';
 
 // SVG（放大缩小后仍保持平滑的矢量画布）用同一套正方形坐标绘制圆环。
 // 绿色弧线根据时间戳算出的进度增长，页面刷新再慢也不会改变真实进度。
@@ -44,11 +49,66 @@ const IDLE_MARKER_Y =
   RING_CENTER +
   RING_RADIUS * Math.sin((RING_START_ANGLE * Math.PI) / 180);
 
+type RecoveryStatus = 'loading' | 'ready' | 'readError' | 'invalid';
+
 export function FastingScreen() {
-  // useState（组件自己的小记事本）只保存当前会话和页面上一次读取到的系统时间。
-  // 重新加载 App 后小记事本会清空，这是阶段 2 允许的结果；本地恢复要到阶段 3 才实现。
+  // useState（组件自己的小记事本）保存已经确认写入手机的会话，以及页面上一次读取到的系统时间。
   const [session, setSession] = useState<FastingSession | null>(null);
   const [now, setNow] = useState(0);
+  const [recoveryStatus, setRecoveryStatus] =
+    useState<RecoveryStatus>('loading');
+  const [isMutating, setIsMutating] = useState(false);
+  const [operationError, setOperationError] = useState<string | null>(null);
+  const isMutatingRef = useRef(false);
+  const recoveryRequestIdRef = useRef(0);
+  const isMountedRef = useRef(true);
+
+  const restoreCurrentSession = useCallback(async () => {
+    const requestId = recoveryRequestIdRef.current + 1;
+    recoveryRequestIdRef.current = requestId;
+    setRecoveryStatus('loading');
+    setOperationError(null);
+
+    try {
+      const storedState = await readCurrentFastingState();
+
+      // 异步竞态是多个等待任务完成顺序不固定。只接受最后一次读取，旧结果就不会覆盖用户刚重试得到的新状态。
+      if (requestId !== recoveryRequestIdRef.current) {
+        return;
+      }
+
+      if (storedState.status === 'invalid') {
+        setSession(null);
+        setRecoveryStatus('invalid');
+        return;
+      }
+
+      if (storedState.status === 'restored') {
+        // 恢复时保留原开始和结束时间，只读取此刻时间刷新页面，不能凭空创建一段新断食。
+        setNow(Date.now());
+        setSession(storedState.session);
+      } else {
+        setSession(null);
+      }
+
+      setRecoveryStatus('ready');
+    } catch {
+      if (requestId === recoveryRequestIdRef.current) {
+        setSession(null);
+        setRecoveryStatus('readError');
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    restoreCurrentSession();
+
+    return () => {
+      isMountedRef.current = false;
+      recoveryRequestIdRef.current += 1;
+    };
+  }, [restoreCurrentSession]);
 
   useEffect(() => {
     if (session === null) {
@@ -122,17 +182,150 @@ export function FastingScreen() {
     primaryActionLabel = '结束本次断食';
   }
 
-  const handlePrimaryAction = () => {
-    if (session !== null) {
-      setSession(null);
+  const handlePrimaryAction = async () => {
+    if (recoveryStatus !== 'ready' || isMutatingRef.current) {
       return;
     }
 
-    // Date.now() 只在用户点击和系统刷新这类边界读取；核心计算拿到固定参数后不会自己读取时钟。
-    const startNow = Date.now();
-    setNow(startNow);
-    setSession(createFastingSession(startNow));
+    // isMutating 表示按钮处理期间暂时禁止再次点击，避免创建两个会话或让先完成的旧操作覆盖新状态。
+    // ref 会立即上锁；即使 React 还没来得及重画禁用按钮，第二次快速点击也会被挡住。
+    isMutatingRef.current = true;
+    setIsMutating(true);
+    setOperationError(null);
+
+    try {
+      if (session === null) {
+        // Date.now() 只在用户点击和系统刷新这类边界读取；核心计算拿到固定参数后不会自己读取时钟。
+        const startNow = Date.now();
+        const nextSession = createFastingSession(startNow);
+
+        // 必须先保存再更新页面；若先显示开始但保存失败，用户重开 App 后会丢失这次断食。
+        await saveCurrentFastingState(nextSession);
+
+        if (isMountedRef.current) {
+          setNow(startNow);
+          setSession(nextSession);
+        }
+      } else {
+        // 结束同样先清手机记录；清除失败时保留页面会话，重开 App 也仍能继续这次断食。
+        await clearCurrentFastingState();
+
+        if (isMountedRef.current) {
+          setSession(null);
+        }
+      }
+    } catch {
+      if (isMountedRef.current) {
+        setOperationError(
+          session === null
+            ? '断食状态保存失败，本次断食尚未开始，请重试。'
+            : '本地状态清除失败，本次断食仍在继续，请重试。',
+        );
+      }
+    } finally {
+      isMutatingRef.current = false;
+
+      if (isMountedRef.current) {
+        setIsMutating(false);
+      }
+    }
   };
+
+  const handleRecoveryAction = async () => {
+    if (recoveryStatus === 'readError') {
+      await restoreCurrentSession();
+      return;
+    }
+
+    if (recoveryStatus !== 'invalid' || isMutatingRef.current) {
+      return;
+    }
+
+    isMutatingRef.current = true;
+    setIsMutating(true);
+    setOperationError(null);
+
+    try {
+      // 损坏数据不会自动消失；只有用户点下重置后才清除，避免把未知旧版本悄悄当成正常 idle。
+      await clearCurrentFastingState();
+
+      if (isMountedRef.current) {
+        setRecoveryStatus('ready');
+      }
+    } catch {
+      if (isMountedRef.current) {
+        setOperationError('本地状态清除失败，原记录仍保留在手机中，请重试。');
+      }
+    } finally {
+      isMutatingRef.current = false;
+
+      if (isMountedRef.current) {
+        setIsMutating(false);
+      }
+    }
+  };
+
+  if (recoveryStatus !== 'ready') {
+    const isLoading = recoveryStatus === 'loading';
+    const recoveryTitle =
+      recoveryStatus === 'invalid'
+        ? '上次断食状态无法恢复'
+        : recoveryStatus === 'readError'
+          ? '暂时无法读取断食状态'
+          : '正在恢复断食状态';
+    const recoveryDetail =
+      recoveryStatus === 'invalid'
+        ? '本地记录已损坏或来自不支持的版本。重置前不会覆盖或删除它。'
+        : recoveryStatus === 'readError'
+          ? '手机暂时没有读到本地记录，请重试。'
+          : '请稍候，读取完成前不会显示可操作页面。';
+    const recoveryActionLabel =
+      recoveryStatus === 'invalid' ? '重置本地状态' : '重试恢复';
+
+    return (
+      <SafeAreaView
+        edges={['top', 'right', 'left']}
+        style={styles.safeArea}>
+        <View style={styles.recoveryContainer}>
+          <Text accessibilityRole="header" style={styles.brand}>
+            NutriTime
+          </Text>
+          <View style={styles.recoveryMessage}>
+            <Text style={styles.recoveryTitle}>{recoveryTitle}</Text>
+            <Text style={styles.recoveryDetail}>{recoveryDetail}</Text>
+            {operationError === null ? null : (
+              <Text accessibilityLiveRegion="polite" style={styles.errorText}>
+                {operationError}
+              </Text>
+            )}
+          </View>
+          {isLoading ? null : (
+            <Pressable
+              accessibilityLabel={recoveryActionLabel}
+              accessibilityRole="button"
+              accessibilityState={{disabled: isMutating}}
+              disabled={isMutating}
+              onPress={handleRecoveryAction}
+              style={({pressed}) => [
+                styles.primaryButton,
+                pressed && styles.primaryButtonPressed,
+                isMutating && styles.primaryButtonDisabled,
+              ]}>
+              <Text style={styles.primaryButtonText}>
+                {isMutating ? '正在重置…' : recoveryActionLabel}
+              </Text>
+            </Pressable>
+          )}
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const displayedActionLabel = isMutating
+    ? isFasting
+      ? '正在结束…'
+      : '正在开始…'
+    : primaryActionLabel;
 
   return (
     <SafeAreaView
@@ -240,15 +433,23 @@ export function FastingScreen() {
           </View>
 
           <Pressable
-            accessibilityLabel={primaryActionLabel}
+            accessibilityLabel={displayedActionLabel}
             accessibilityRole="button"
+            accessibilityState={{disabled: isMutating}}
+            disabled={isMutating}
             onPress={handlePrimaryAction}
             style={({pressed}) => [
               styles.primaryButton,
               pressed && styles.primaryButtonPressed,
+              isMutating && styles.primaryButtonDisabled,
             ]}>
-            <Text style={styles.primaryButtonText}>{primaryActionLabel}</Text>
+            <Text style={styles.primaryButtonText}>{displayedActionLabel}</Text>
           </Pressable>
+          {operationError === null ? null : (
+            <Text accessibilityLiveRegion="polite" style={styles.errorText}>
+              {operationError}
+            </Text>
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -278,6 +479,32 @@ const styles = StyleSheet.create({
     color: theme.colors.text,
     fontSize: 20,
     fontWeight: '700',
+  },
+  recoveryContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: theme.spacing.lg,
+    paddingRight: theme.spacing.xl,
+    paddingBottom: 132,
+    paddingLeft: theme.spacing.xl,
+  },
+  recoveryMessage: {
+    alignItems: 'center',
+    gap: theme.spacing.md,
+  },
+  recoveryTitle: {
+    color: theme.colors.text,
+    fontSize: 22,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  recoveryDetail: {
+    maxWidth: 320,
+    color: theme.colors.textSecondary,
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: 'center',
   },
   durationBadge: {
     borderRadius: theme.radius.lg,
@@ -371,9 +598,19 @@ const styles = StyleSheet.create({
   primaryButtonPressed: {
     opacity: 0.7,
   },
+  primaryButtonDisabled: {
+    opacity: 0.55,
+  },
   primaryButtonText: {
     color: theme.colors.text,
     fontSize: 18,
     fontWeight: '700',
+  },
+  errorText: {
+    maxWidth: 330,
+    color: theme.colors.textSecondary,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
   },
 });
