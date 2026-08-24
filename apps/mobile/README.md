@@ -1,12 +1,12 @@
 # NutriTime Mobile
 
-这里是 NutriTime 的 Android 手机工程。当前已完成 Android 手机端 16 小时断食技术 MVP 验收；8 小时进食窗口属于下一正式里程碑，因此当前不是完整 16:8。
+这里是 NutriTime 的 Android 手机工程。当前已经实现由用户明确控制的完整周期：默认 16 小时断食后进入 8 小时进食窗口，也可修改为 14:10 等整小时比例，再由用户明确结束回到空闲状态。
 
 当前工程从 MochiLedger 的 React Native 0.86 导航基础迁移而来，并已接入 Expo SDK 57 Development Build。目前包含：
 
 - “禁食 / 统计”双入口悬浮胶囊导航；
-- 按确认稿实现的禁食界面，以及可在 App 重开后恢复的真实 16 小时断食会话；
-- 由 Android 手机在目标时间附近安排并可提前取消的本地提醒；
+- 按确认稿最小扩展的周期界面、底部时间编辑层，以及可在 App 重开后恢复的 fasting/eating 当前会话和自定义比例；
+- 由 Android 手机为断食和进食窗口分别安排、切换并提前取消的本地提醒；
 - 由 Expo Prebuild 生成的 Android 原生工程；
 - 公共页面外壳、主题、导航测试；
 - 字体和导航图片等静态资源。
@@ -48,10 +48,12 @@ pnpm test -- --runInBand
 
 - 目前以 Expo Development Build 为主，不使用 Expo Go 承载后续原生能力。
 - 统计页面只有占位内容。
-- 禁食页只保存当前活动会话，重新打开后继续根据原开始时间和计划结束时间计算，不保存每秒变化的倒计时。
+- 周期页只保存当前活动阶段，重新打开后继续根据原开始时间和计划结束时间计算，不保存每秒变化的倒计时，也不会在倒计时到零时自动切换状态。
+- 活动阶段使用 `@nutritime/fasting/current` 和 `storageVersion: 2`；阶段 3～7 的合法 v1 fasting 数据读取后会保留原会话并迁移到 v2。自定义比例使用 `@nutritime/cycle/plan`，正常结束 eating 不会清掉它。
+- 顶部比例入口可以调整断食/进食时长；活动阶段的开始时间也可以修改。两种修改都先保存，再更新页面、结束时间和唯一提醒。
 - 目标时间提醒不申请精确闹钟权限，因此可能受省电策略影响而延后，不承诺精确到秒。
 - 最近任务划掉、系统回收、设备重启和 force stop 的区别与阶段 4 实测状态见 `../../docs/manual-test-checklist.md`。
-- Wear OS 不自行安排同类提醒；手机正式发送已接入，Wear 接收、协议错误处理和真实联调仍未完成。
-- 本次只完成阶段 7 的手机端技术 MVP 验收；原计划中的完整阶段 7 仍待 Wear 正式接收、last good state、非法协议处理和真实联调完成。
+- Wear OS 不自行安排同类提醒；现有 Wear v1 只支持 idle/fasting，手机进入 eating 时向旧协议提交 idle，避免手表继续显示断食。这是兼容降级，Wear eating、协议错误处理和真实联调仍未完成。
+- 手机端没有后端、账号、历史、云同步或手表双向操作。
 - Android applicationId 为 `com.zensoku.nutritime`；手机和手表的同类构建还必须使用匹配签名。
 - 当前 mobile versionCode 从 `1000001` 起步。

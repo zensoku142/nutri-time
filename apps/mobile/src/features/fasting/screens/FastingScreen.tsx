@@ -1,5 +1,5 @@
 // ==================== 禁食页面 ====================
-// 页面按已确认的手机设计稿展示 16 小时断食计划，并在启动时恢复手机里保存的当前会话。
+// 页面沿用已确认的手机设计稿，展示 16 小时断食和随后 8 小时进食窗口，并在启动时恢复当前阶段。
 
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {
@@ -20,27 +20,41 @@ import {
 } from '../../../../modules/wear-data-layer';
 import {theme} from '../../../app/theme';
 import {
+  CyclePlanEditorModal,
+  StartTimeEditorModal,
+} from '../components/CycleTimeEditorModals';
+import {
+  createEatingSession,
+  createCyclePlanFromFastingHours,
   createFastingSession,
-  DEFAULT_FASTING_MINUTES,
+  DEFAULT_CYCLE_PLAN,
   formatClockTime,
   formatElapsedMs,
   formatRemainingMs,
   getElapsedMs,
   getRemainingMs,
+  getSessionDurationMinutes,
+  MAX_FASTING_HOURS,
+  MIN_FASTING_HOURS,
+  updateCycleSessionStart,
 } from '../domain/fasting';
-import type {FastingSession} from '../domain/fasting';
+import type {ActiveCycleSession, CyclePlan} from '../domain/fasting';
 import {
-  cancelFastingCompletionNotification,
-  isFastingCompletionNotificationScheduled,
-  requestFastingNotificationPermission,
-  scheduleFastingCompletionNotification,
+  cancelCycleCompletionNotification,
+  isCycleCompletionNotificationScheduled,
+  requestCycleNotificationPermission,
+  scheduleCycleCompletionNotification,
 } from '../notifications/fastingNotifications';
 import {
   clearCurrentFastingState,
+  readCyclePlan,
   readCurrentFastingState,
+  resetCurrentCycleData,
+  saveCyclePlan,
+  saveCyclePlanAndCurrentState,
   saveCurrentFastingState,
 } from '../storage/fastingStorage';
-import type {PersistedFastingState} from '../storage/fastingStorage';
+import type {PersistedCycleState} from '../storage/fastingStorage';
 
 // SVG（放大缩小后仍保持平滑的矢量画布）用同一套正方形坐标绘制圆环。
 // 绿色弧线根据时间戳算出的进度增长，页面刷新再慢也不会改变真实进度。
@@ -61,12 +75,20 @@ const IDLE_MARKER_Y =
   RING_RADIUS * Math.sin((RING_START_ANGLE * Math.PI) / 180);
 
 type RecoveryStatus = 'loading' | 'ready' | 'readError' | 'invalid';
-type ActiveMutation = 'starting' | 'ending' | 'resetting' | null;
+type ActiveMutation =
+  | 'startingFasting'
+  | 'startingEating'
+  | 'endingEating'
+  | 'updatingPlan'
+  | 'updatingStart'
+  | 'resetting'
+  | null;
+type TimeEditor = 'plan' | 'start' | null;
 
 const REMINDER_UNAVAILABLE_MESSAGE =
-  '断食仍在进行，但提醒未启用。请留意计划结束时间。';
+  '当前周期仍在继续，但提醒未启用。请留意计划结束时间。';
 const REMINDER_CANCEL_FAILED_MESSAGE =
-  '断食已结束，但旧提醒可能仍会出现，请在系统通知中忽略它。';
+  '状态已更新，但上一阶段提醒可能仍会出现，请在系统通知中忽略它。';
 
 function reportReminderError(action: string, error: unknown) {
   // 诊断日志只记录失败步骤和错误种类，不记录会话时间或其他可能暴露用户习惯的数据。
@@ -90,10 +112,10 @@ async function submitCurrentFastingToWear(
 }
 
 async function scheduleAndPersistCompletionReminder(
-  session: FastingSession,
+  session: ActiveCycleSession,
 ): Promise<string | null> {
   try {
-    const permissionGranted = await requestFastingNotificationPermission();
+    const permissionGranted = await requestCycleNotificationPermission();
 
     if (!permissionGranted) {
       return null;
@@ -106,8 +128,9 @@ async function scheduleAndPersistCompletionReminder(
   let notificationId: string;
 
   try {
-    notificationId = await scheduleFastingCompletionNotification(
+    notificationId = await scheduleCycleCompletionNotification(
       session.plannedEndAt,
+      session.status,
     );
   } catch (error) {
     reportReminderError('notification-schedule-failed', error);
@@ -123,7 +146,7 @@ async function scheduleAndPersistCompletionReminder(
     // 提醒已经交给系统，但取件号码没写进手机小抽屉时，结束断食就再也找不到它。
     // 因此这里马上撤销刚安排的提醒；即使撤销也失败，本地会话仍是主要结果，不能跟着回滚。
     try {
-      await cancelFastingCompletionNotification(notificationId);
+      await cancelCycleCompletionNotification(notificationId);
     } catch (cancelError) {
       reportReminderError(
         'notification-compensation-cancel-failed',
@@ -135,10 +158,62 @@ async function scheduleAndPersistCompletionReminder(
   }
 }
 
+type ReminderReplacementResult = {
+  notificationId: string | null;
+  notice: string | null;
+};
+
+async function replaceCompletionReminder(
+  previousNotificationId: string | undefined,
+  session: ActiveCycleSession,
+  now: number,
+): Promise<ReminderReplacementResult> {
+  let previousReminderCancelFailed = false;
+
+  if (previousNotificationId !== undefined) {
+    try {
+      await cancelCycleCompletionNotification(previousNotificationId);
+    } catch (error) {
+      previousReminderCancelFailed = true;
+      reportReminderError('notification-cancel-failed', error);
+    }
+  }
+
+  // 修改后的目标若已经过去，只保留到期页面，不把过去时间再次交给 Android 安排提醒。
+  if (session.plannedEndAt <= now) {
+    return {
+      notificationId: null,
+      notice: previousReminderCancelFailed
+        ? REMINDER_CANCEL_FAILED_MESSAGE
+        : null,
+    };
+  }
+
+  const notificationId = await scheduleAndPersistCompletionReminder(session);
+
+  if (notificationId === null) {
+    return {
+      notificationId: null,
+      notice: previousReminderCancelFailed
+        ? `${REMINDER_CANCEL_FAILED_MESSAGE} ${REMINDER_UNAVAILABLE_MESSAGE}`
+        : REMINDER_UNAVAILABLE_MESSAGE,
+    };
+  }
+
+  return {
+    notificationId,
+    notice: previousReminderCancelFailed
+      ? REMINDER_CANCEL_FAILED_MESSAGE
+      : null,
+  };
+}
+
 export function FastingScreen() {
   // useState（组件自己的小记事本）保存已经确认写入手机的会话和提醒取件号码，以及页面上一次读取到的系统时间。
   const [persistedState, setPersistedState] =
-    useState<PersistedFastingState | null>(null);
+    useState<PersistedCycleState | null>(null);
+  const [cyclePlan, setCyclePlan] =
+    useState<CyclePlan>(DEFAULT_CYCLE_PLAN);
   const [now, setNow] = useState(0);
   const [recoveryStatus, setRecoveryStatus] =
     useState<RecoveryStatus>('loading');
@@ -146,11 +221,19 @@ export function FastingScreen() {
     useState<ActiveMutation>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [reminderNotice, setReminderNotice] = useState<string | null>(null);
+  const [timeEditor, setTimeEditor] = useState<TimeEditor>(null);
+  const [draftFastingHours, setDraftFastingHours] = useState(
+    DEFAULT_CYCLE_PLAN.fastingMinutes / 60,
+  );
+  const [draftStartAt, setDraftStartAt] = useState(0);
+  const [editorError, setEditorError] = useState<string | null>(null);
   const isMutatingRef = useRef(false);
   const recoveryRequestIdRef = useRef(0);
   const isMountedRef = useRef(true);
   const session = persistedState?.session ?? null;
   const isMutating = activeMutation !== null;
+  const isEditorSaving =
+    activeMutation === 'updatingPlan' || activeMutation === 'updatingStart';
 
   const restoreCurrentSession = useCallback(async () => {
     const requestId = recoveryRequestIdRef.current + 1;
@@ -160,18 +243,23 @@ export function FastingScreen() {
     setReminderNotice(null);
 
     try {
-      const storedState = await readCurrentFastingState();
+      const [storedState, storedPlan] = await Promise.all([
+        readCurrentFastingState(),
+        readCyclePlan(),
+      ]);
 
       // 异步竞态是多个等待任务完成顺序不固定。只接受最后一次读取，旧结果就不会覆盖用户刚重试得到的新状态。
       if (requestId !== recoveryRequestIdRef.current) {
         return;
       }
 
-      if (storedState.status === 'invalid') {
+      if (storedState.status === 'invalid' || storedPlan.status === 'invalid') {
         setPersistedState(null);
         setRecoveryStatus('invalid');
         return;
       }
+
+      setCyclePlan(storedPlan.plan);
 
       if (storedState.status === 'restored') {
         // 恢复时保留原开始和结束时间，只读取此刻时间刷新页面，不能凭空创建一段新断食。
@@ -187,7 +275,7 @@ export function FastingScreen() {
           if (restoredState.completionNotificationId !== undefined) {
             try {
               shouldScheduleReminder =
-                !(await isFastingCompletionNotificationScheduled(
+                !(await isCycleCompletionNotificationScheduled(
                   restoredState.completionNotificationId,
                 ));
             } catch (error) {
@@ -226,18 +314,25 @@ export function FastingScreen() {
           }
         }
 
+        // Wear v1 只认识 idle/fasting。恢复 eating 时提交普通 idle，避免旧手表重开后继续显示上一段断食。
+        const wearRestorePayload: WearSyncPayload =
+          storedState.session.status === 'fasting'
+            ? {
+                protocolVersion: 1,
+                status: 'fasting',
+                sessionId: storedState.session.id,
+                startAt: storedState.session.startAt,
+                plannedEndAt: storedState.session.plannedEndAt,
+                stateChangedAt: storedState.session.startAt,
+              }
+            : {
+                protocolVersion: 1,
+                status: 'idle',
+                stateChangedAt: storedState.session.startAt,
+              };
+
         // 启动恢复只是把手机已有真相放回共享信箱，不是用户的新操作，因此使用普通 DataItem。
-        await submitCurrentFastingToWear(
-          {
-            protocolVersion: 1,
-            status: 'fasting',
-            sessionId: storedState.session.id,
-            startAt: storedState.session.startAt,
-            plannedEndAt: storedState.session.plannedEndAt,
-            stateChangedAt: storedState.session.startAt,
-          },
-          false,
-        );
+        await submitCurrentFastingToWear(wearRestorePayload, false);
 
         if (requestId !== recoveryRequestIdRef.current) {
           return;
@@ -300,11 +395,12 @@ export function FastingScreen() {
   );
 
   // session 中的开始和结束时间戳是唯一真相；已进行、剩余和格式化文字都在本次显示时重新得出，不另存副本。
-  const isFasting = session !== null;
+  const isFasting = session?.status === 'fasting';
+  const isEating = session?.status === 'eating';
   const elapsedMs = session === null ? 0 : getElapsedMs(session.startAt, now);
   const remainingMs =
     session === null ? 0 : getRemainingMs(session.plannedEndAt, now);
-  const hasReachedGoal = session !== null && remainingMs === 0;
+  const hasReachedStageEnd = session !== null && remainingMs === 0;
   const progress =
     session === null
       ? 0
@@ -313,28 +409,40 @@ export function FastingScreen() {
           elapsedMs / (session.plannedEndAt - session.startAt),
         );
   const progressPercent = Math.floor(progress * 100);
+  const fastingHours = cyclePlan.fastingMinutes / 60;
+  const eatingHours = cyclePlan.eatingMinutes / 60;
   // 弧长必须严格跟随真实时间百分比；若人为保留最小长度，刚开始就会看起来凭空完成了一截。
   const activeArcLength = RING_TRACK_LENGTH * progress;
-  let statusTitle = '16 小时断食';
+  let statusTitle = `${fastingHours}:${eatingHours} 轻断食`;
   let statusDetail = '准备开始';
-  let displayedDuration = formatRemainingMs(
-    DEFAULT_FASTING_MINUTES * 60 * 1000,
-  );
-  let statusHint = '计划断食 16 小时';
+  let displayedDuration = formatRemainingMs(cyclePlan.fastingMinutes * 60 * 1000);
+  let statusHint = `先断食 ${fastingHours} 小时，再进食 ${eatingHours} 小时`;
   let primaryActionLabel = '开始断食';
 
   if (isFasting) {
-    statusTitle = '断食进行中';
+    statusTitle = '断食已进行';
     statusDetail = `已完成 ${progressPercent}%`;
-    displayedDuration = formatElapsedMs(elapsedMs);
-    statusHint = `还剩 ${formatRemainingMs(remainingMs)}`;
+    displayedDuration = formatRemainingMs(remainingMs);
+    statusHint = `已进行 ${formatElapsedMs(elapsedMs)}`;
     primaryActionLabel = '结束断食';
   }
 
-  if (hasReachedGoal) {
-    statusTitle = '目标已达成';
-    statusHint = '你完成了本次断食';
-    primaryActionLabel = '结束本次断食';
+  if (isEating) {
+    statusTitle = '进食窗口';
+    statusDetail = `已进行 ${progressPercent}%`;
+    displayedDuration = formatRemainingMs(remainingMs);
+    statusHint = `已进行 ${formatElapsedMs(elapsedMs)}`;
+    primaryActionLabel = '结束进食窗口';
+  }
+
+  if (hasReachedStageEnd && isFasting) {
+    statusTitle = '断食目标已达成';
+    statusHint = `点击结束断食后进入 ${eatingHours} 小时进食窗口`;
+  }
+
+  if (hasReachedStageEnd && isEating) {
+    statusTitle = '进食窗口已结束';
+    statusHint = '点击结束进食窗口后回到空闲状态';
   }
 
   const handlePrimaryAction = async () => {
@@ -342,27 +450,36 @@ export function FastingScreen() {
       return;
     }
 
-    const isStarting = persistedState === null;
+    const currentStatus = persistedState?.session.status ?? 'idle';
+    const nextMutation: ActiveMutation =
+      currentStatus === 'idle'
+        ? 'startingFasting'
+        : currentStatus === 'fasting'
+          ? 'startingEating'
+          : 'endingEating';
 
     // isMutating 表示按钮处理期间暂时禁止再次点击，避免创建两个会话、两条提醒或让先完成的旧操作覆盖新状态。
     // ref 会立即上锁；即使 React 还没来得及重画禁用按钮，第二次快速点击也会被挡住。
     isMutatingRef.current = true;
-    setActiveMutation(isStarting ? 'starting' : 'ending');
+    setActiveMutation(nextMutation);
     setOperationError(null);
     setReminderNotice(null);
 
     try {
-      if (isStarting) {
+      if (persistedState === null) {
         // Date.now() 只在用户点击和系统刷新这类边界读取；核心计算拿到固定参数后不会自己读取时钟。
         const startNow = Date.now();
-        const nextSession = createFastingSession(startNow);
+        const nextSession = createFastingSession(
+          startNow,
+          cyclePlan.fastingMinutes,
+        );
 
         // 必须先保存再更新页面；若先显示开始但保存失败，用户重开 App 后会丢失这次断食。
         await saveCurrentFastingState(nextSession);
 
         if (isMountedRef.current) {
           setNow(startNow);
-          setPersistedState({storageVersion: 1, session: nextSession});
+          setPersistedState({storageVersion: 2, session: nextSession});
         }
 
         // 本地会话是用户点击开始后的主要结果，提醒只是辅助能力；后面的权限或系统通知失败都不能取消断食。
@@ -374,7 +491,7 @@ export function FastingScreen() {
             setReminderNotice(REMINDER_UNAVAILABLE_MESSAGE);
           } else {
             setPersistedState({
-              storageVersion: 1,
+              storageVersion: 2,
               session: nextSession,
               completionNotificationId: notificationId,
             });
@@ -393,14 +510,57 @@ export function FastingScreen() {
           },
           true,
         );
+      } else if (persistedState.session.status === 'fasting') {
+        const previousNotificationId =
+          persistedState.completionNotificationId;
+        const eatingStartNow = Date.now();
+        const nextSession = createEatingSession(
+          eatingStartNow,
+          cyclePlan.eatingMinutes,
+        );
+
+        // 用户结束断食后，先把新的 eating 会话保存成功；写入失败时页面和旧提醒都继续保持 fasting。
+        await saveCurrentFastingState(nextSession);
+
+        if (isMountedRef.current) {
+          setNow(eatingStartNow);
+          setPersistedState({storageVersion: 2, session: nextSession});
+        }
+
+        // eating 已经保存成功，旧提醒取消或新提醒安排失败都不能把手机状态退回 fasting。
+        const reminderResult = await replaceCompletionReminder(
+          previousNotificationId,
+          nextSession,
+          eatingStartNow,
+        );
+
+        if (isMountedRef.current) {
+          if (reminderResult.notificationId !== null) {
+            setPersistedState({
+              storageVersion: 2,
+              session: nextSession,
+              completionNotificationId: reminderResult.notificationId,
+            });
+          }
+
+          setReminderNotice(reminderResult.notice);
+        }
+
+        // Wear v1 不能表示 eating；urgent idle 只用于清掉手表上的旧 fasting，不代表手表已经支持进食窗口。
+        await submitCurrentFastingToWear(
+          {
+            protocolVersion: 1,
+            status: 'idle',
+            stateChangedAt: eatingStartNow,
+          },
+          true,
+        );
       } else {
         // 清除前先拿出提醒取件号码；本地记录删掉后就不能再从手机小抽屉里找回它。
         const notificationId = persistedState.completionNotificationId;
 
-        // 结束同样先清手机记录；清除失败时保留页面会话，重开 App 也仍能继续这次断食。
+        // 结束进食窗口同样先清手机记录；清除失败时保留 eating，重开 App 也仍能继续显示当前窗口。
         await clearCurrentFastingState();
-        // idle 的变化时间在本地清除刚成功时固定下来；后续取消系统提醒即使很慢，也不能把业务结束时间推迟。
-        const idleStateChangedAt = Date.now();
 
         if (isMountedRef.current) {
           setPersistedState(null);
@@ -408,8 +568,8 @@ export function FastingScreen() {
 
         if (notificationId !== undefined) {
           try {
-            // 本地清除已经成功，取消提醒失败也不能把用户明确结束的会话恢复回来。
-            await cancelFastingCompletionNotification(notificationId);
+            // 本地清除已经成功，取消提醒失败也不能把用户明确结束的进食窗口恢复回来。
+            await cancelCycleCompletionNotification(notificationId);
           } catch (error) {
             reportReminderError('notification-cancel-failed', error);
 
@@ -418,23 +578,236 @@ export function FastingScreen() {
             }
           }
         }
-        // 清除成功已经让手机回到 idle；旧提醒即使取消失败，也必须继续把这次结束提交到共享信箱。
+
+        // 进入 eating 时已经向 Wear v1 提交过 idle；结束 eating 不重复发送相同状态，避免没有业务变化的额外同步。
+      }
+    } catch {
+      if (isMountedRef.current) {
+        setOperationError(
+          currentStatus === 'idle'
+            ? '断食状态保存失败，本次断食尚未开始，请重试。'
+            : currentStatus === 'fasting'
+              ? '进食窗口保存失败，本次断食仍在继续，请重试。'
+              : '本地状态清除失败，进食窗口仍在继续，请重试。',
+        );
+      }
+    } finally {
+      isMutatingRef.current = false;
+
+      if (isMountedRef.current) {
+        setActiveMutation(null);
+      }
+    }
+  };
+
+  const openPlanEditor = () => {
+    if (recoveryStatus !== 'ready' || isMutatingRef.current) {
+      return;
+    }
+
+    setDraftFastingHours(cyclePlan.fastingMinutes / 60);
+    setEditorError(null);
+    setTimeEditor('plan');
+  };
+
+  const openStartTimeEditor = () => {
+    if (
+      recoveryStatus !== 'ready' ||
+      persistedState === null ||
+      isMutatingRef.current
+    ) {
+      return;
+    }
+
+    setDraftStartAt(persistedState.session.startAt);
+    setEditorError(null);
+    setTimeEditor('start');
+  };
+
+  const closeTimeEditor = () => {
+    if (!isEditorSaving) {
+      setTimeEditor(null);
+      setEditorError(null);
+    }
+  };
+
+  const shiftDraftStartAt = (
+    unit: 'day' | 'hour' | 'minute',
+    amount: number,
+  ) => {
+    setDraftStartAt(currentDraft => {
+      const date = new Date(currentDraft);
+
+      if (unit === 'day') {
+        date.setDate(date.getDate() + amount);
+      } else if (unit === 'hour') {
+        date.setHours(date.getHours() + amount);
+      } else {
+        date.setMinutes(date.getMinutes() + amount);
+      }
+
+      return date.getTime();
+    });
+  };
+
+  const confirmPlanChange = async () => {
+    if (isMutatingRef.current) {
+      return;
+    }
+
+    const nextPlan = createCyclePlanFromFastingHours(draftFastingHours);
+    const currentState = persistedState;
+    const actionNow = Date.now();
+
+    isMutatingRef.current = true;
+    setActiveMutation('updatingPlan');
+    setEditorError(null);
+    setReminderNotice(null);
+
+    try {
+      if (currentState === null) {
+        await saveCyclePlan(nextPlan);
+
+        if (isMountedRef.current) {
+          setCyclePlan(nextPlan);
+          setTimeEditor(null);
+        }
+
+        return;
+      }
+
+      const nextSession = updateCycleSessionStart(
+        currentState.session,
+        currentState.session.startAt,
+        getSessionDurationMinutes(nextPlan, currentState.session.status),
+      );
+      const nextState: PersistedCycleState = {
+        storageVersion: 2,
+        session: nextSession,
+      };
+
+      // 活动阶段的比例和结束时间必须一起保存；任一写入失败都保持页面原状态和旧提醒。
+      await saveCyclePlanAndCurrentState(nextPlan, nextState);
+
+      if (isMountedRef.current) {
+        setCyclePlan(nextPlan);
+        setPersistedState(nextState);
+        setNow(actionNow);
+      }
+
+      const reminderResult = await replaceCompletionReminder(
+        currentState.completionNotificationId,
+        nextSession,
+        actionNow,
+      );
+
+      if (isMountedRef.current) {
+        setPersistedState({
+          ...nextState,
+          ...(reminderResult.notificationId === null
+            ? {}
+            : {completionNotificationId: reminderResult.notificationId}),
+        });
+        setReminderNotice(reminderResult.notice);
+        setTimeEditor(null);
+      }
+
+      if (nextSession.status === 'fasting') {
         await submitCurrentFastingToWear(
           {
             protocolVersion: 1,
-            status: 'idle',
-            stateChangedAt: idleStateChangedAt,
+            status: 'fasting',
+            sessionId: nextSession.id,
+            startAt: nextSession.startAt,
+            plannedEndAt: nextSession.plannedEndAt,
+            stateChangedAt: actionNow,
           },
           true,
         );
       }
     } catch {
       if (isMountedRef.current) {
-        setOperationError(
-          isStarting
-            ? '断食状态保存失败，本次断食尚未开始，请重试。'
-            : '本地状态清除失败，本次断食仍在继续，请重试。',
+        setEditorError('周期时长保存失败，原计划仍然有效，请重试。');
+      }
+    } finally {
+      isMutatingRef.current = false;
+
+      if (isMountedRef.current) {
+        setActiveMutation(null);
+      }
+    }
+  };
+
+  const confirmStartTimeChange = async () => {
+    if (isMutatingRef.current || persistedState === null) {
+      return;
+    }
+
+    const currentState = persistedState;
+    const actionNow = Date.now();
+
+    if (draftStartAt > actionNow) {
+      setEditorError('开始时间不能晚于当前时间，请重新选择。');
+      return;
+    }
+
+    const nextSession = updateCycleSessionStart(
+      currentState.session,
+      draftStartAt,
+      getSessionDurationMinutes(cyclePlan, currentState.session.status),
+    );
+    const nextState: PersistedCycleState = {
+      storageVersion: 2,
+      session: nextSession,
+    };
+
+    isMutatingRef.current = true;
+    setActiveMutation('updatingStart');
+    setEditorError(null);
+    setReminderNotice(null);
+
+    try {
+      // 修改开始时间同样先保存；失败时页面、旧提醒和 Wear 快照都维持原值。
+      await saveCurrentFastingState(nextSession);
+
+      if (isMountedRef.current) {
+        setPersistedState(nextState);
+        setNow(actionNow);
+      }
+
+      const reminderResult = await replaceCompletionReminder(
+        currentState.completionNotificationId,
+        nextSession,
+        actionNow,
+      );
+
+      if (isMountedRef.current) {
+        setPersistedState({
+          ...nextState,
+          ...(reminderResult.notificationId === null
+            ? {}
+            : {completionNotificationId: reminderResult.notificationId}),
+        });
+        setReminderNotice(reminderResult.notice);
+        setTimeEditor(null);
+      }
+
+      if (nextSession.status === 'fasting') {
+        await submitCurrentFastingToWear(
+          {
+            protocolVersion: 1,
+            status: 'fasting',
+            sessionId: nextSession.id,
+            startAt: nextSession.startAt,
+            plannedEndAt: nextSession.plannedEndAt,
+            stateChangedAt: actionNow,
+          },
+          true,
         );
+      }
+    } catch {
+      if (isMountedRef.current) {
+        setEditorError('开始时间保存失败，原时间仍然有效，请重试。');
       }
     } finally {
       isMutatingRef.current = false;
@@ -461,9 +834,10 @@ export function FastingScreen() {
 
     try {
       // 损坏数据不会自动消失；只有用户点下重置后才清除，避免把未知旧版本悄悄当成正常 idle。
-      await clearCurrentFastingState();
+      await resetCurrentCycleData();
 
       if (isMountedRef.current) {
+        setCyclePlan(DEFAULT_CYCLE_PLAN);
         setRecoveryStatus('ready');
       }
     } catch {
@@ -483,10 +857,10 @@ export function FastingScreen() {
     const isLoading = recoveryStatus === 'loading';
     const recoveryTitle =
       recoveryStatus === 'invalid'
-        ? '上次断食状态无法恢复'
+        ? '上次周期状态无法恢复'
         : recoveryStatus === 'readError'
-          ? '暂时无法读取断食状态'
-          : '正在恢复断食状态';
+          ? '暂时无法读取周期状态'
+          : '正在恢复周期状态';
     const recoveryDetail =
       recoveryStatus === 'invalid'
         ? '本地记录已损坏或来自不支持的版本。重置前不会覆盖或删除它。'
@@ -536,11 +910,14 @@ export function FastingScreen() {
   }
 
   const displayedActionLabel =
-    activeMutation === 'starting'
-      ? '正在开始…'
-      : activeMutation === 'ending'
-        ? '正在结束…'
-        : primaryActionLabel;
+    activeMutation === 'startingFasting'
+      ? '正在开始断食…'
+      : activeMutation === 'startingEating'
+        ? '正在进入进食窗口…'
+        : activeMutation === 'endingEating'
+          ? '正在结束进食窗口…'
+          : primaryActionLabel;
+  const durationBadgeLabel = `${fastingHours}:${eatingHours} · 修改`;
 
   return (
     <SafeAreaView
@@ -553,14 +930,23 @@ export function FastingScreen() {
           <Text accessibilityRole="header" style={styles.brand}>
             NutriTime
           </Text>
-          <View style={styles.durationBadge}>
-            <Text style={styles.durationBadgeText}>16 小时</Text>
-          </View>
+          <Pressable
+            accessibilityLabel="修改断食和进食时长"
+            accessibilityRole="button"
+            disabled={isMutating}
+            onPress={openPlanEditor}
+            style={({pressed}) => [
+              styles.durationBadge,
+              pressed && styles.primaryButtonPressed,
+              isMutating && styles.primaryButtonDisabled,
+            ]}>
+            <Text style={styles.durationBadgeText}>{durationBadgeLabel}</Text>
+          </Pressable>
         </View>
 
         <View style={styles.mainContent}>
           <View
-            accessibilityLabel={`当前断食状态：${statusTitle}`}
+            accessibilityLabel={`当前周期状态：${statusTitle}`}
             accessible
             style={[styles.statusRing, {width: ringSize, height: ringSize}]}>
             <Svg
@@ -580,7 +966,7 @@ export function FastingScreen() {
                 strokeLinecap="round"
                 strokeWidth={RING_STROKE_WIDTH}
               />
-              {isFasting ? (
+              {session !== null ? (
                 <Circle
                   cx={RING_CENTER}
                   cy={RING_CENTER}
@@ -620,9 +1006,20 @@ export function FastingScreen() {
 
           <View style={styles.summaryRow}>
             <View style={[styles.summaryItem, styles.summaryDivider]}>
-              <Text style={styles.summaryLabel}>
-                {isFasting ? '已开始' : '开始'}
-              </Text>
+              <View style={styles.summaryLabelRow}>
+                <Text style={styles.summaryLabel}>
+                  {isFasting ? '断食开始' : isEating ? '进食开始' : '开始'}
+                </Text>
+                {session === null ? null : (
+                  <Pressable
+                    accessibilityLabel={`修改${isFasting ? '断食' : '进食'}开始时间`}
+                    accessibilityRole="button"
+                    disabled={isMutating}
+                    onPress={openStartTimeEditor}>
+                    <Text style={styles.editTimeText}>修改</Text>
+                  </Pressable>
+                )}
+              </View>
               <Text
                 adjustsFontSizeToFit
                 numberOfLines={1}
@@ -634,7 +1031,7 @@ export function FastingScreen() {
             </View>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryLabel}>
-                {isFasting ? '计划结束' : '目标'}
+                {session === null ? '目标' : '计划结束'}
               </Text>
               <Text
                 adjustsFontSizeToFit
@@ -672,6 +1069,39 @@ export function FastingScreen() {
           )}
         </View>
       </ScrollView>
+      <CyclePlanEditorModal
+        canDecreaseFasting={draftFastingHours > MIN_FASTING_HOURS}
+        canIncreaseFasting={draftFastingHours < MAX_FASTING_HOURS}
+        eatingHours={24 - draftFastingHours}
+        error={editorError}
+        fastingHours={draftFastingHours}
+        isSaving={isEditorSaving}
+        onCancel={closeTimeEditor}
+        onConfirm={confirmPlanChange}
+        onDecreaseFasting={() =>
+          setDraftFastingHours(current =>
+            Math.max(MIN_FASTING_HOURS, current - 1),
+          )
+        }
+        onIncreaseFasting={() =>
+          setDraftFastingHours(current =>
+            Math.min(MAX_FASTING_HOURS, current + 1),
+          )
+        }
+        visible={timeEditor === 'plan'}
+      />
+      <StartTimeEditorModal
+        draftStartAt={draftStartAt}
+        error={editorError}
+        isSaving={isEditorSaving}
+        onCancel={closeTimeEditor}
+        onConfirm={confirmStartTimeChange}
+        onShiftDay={amount => shiftDraftStartAt('day', amount)}
+        onShiftHour={amount => shiftDraftStartAt('hour', amount)}
+        onShiftMinute={amount => shiftDraftStartAt('minute', amount)}
+        stageLabel={isEating ? '进食' : '断食'}
+        visible={timeEditor === 'start'}
+      />
     </SafeAreaView>
   );
 }
@@ -796,9 +1226,20 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderRightColor: theme.colors.border,
   },
+  summaryLabelRow: {
+    minHeight: 22,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+  },
   summaryLabel: {
     color: theme.colors.textSecondary,
     fontSize: 14,
+  },
+  editTimeText: {
+    color: theme.colors.fastingActive,
+    fontSize: 13,
+    fontWeight: '700',
   },
   summaryValue: {
     color: theme.colors.text,

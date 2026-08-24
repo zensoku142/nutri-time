@@ -2,12 +2,17 @@
 // 所有场景都传入固定 now，不读取电脑当前时间，因此无论何时运行都得到相同结果。
 
 import {
+  createEatingSession,
+  createCyclePlanFromFastingHours,
   createFastingSession,
+  DEFAULT_EATING_MINUTES,
   DEFAULT_FASTING_MINUTES,
   formatElapsedMs,
   formatRemainingMs,
   getElapsedMs,
   getRemainingMs,
+  getSessionDurationMinutes,
+  updateCycleSessionStart,
 } from './fasting';
 
 const FIXED_NOW = 1_787_313_600_000;
@@ -28,11 +33,61 @@ test('创建会话使用传入时间和正式 16 小时默认时长', () => {
 });
 
 test('测试可以传入短时长，不改变正式默认值', () => {
-  const session = createFastingSession(FIXED_NOW, 2);
+  const fastingSession = createFastingSession(FIXED_NOW, 2);
+  const eatingSession = createEatingSession(FIXED_NOW, 1);
 
-  expect(session.startAt).toBe(FIXED_NOW);
-  expect(session.plannedEndAt).toBe(FIXED_NOW + 2 * ONE_MINUTE_MS);
+  expect(fastingSession.startAt).toBe(FIXED_NOW);
+  expect(fastingSession.plannedEndAt).toBe(
+    FIXED_NOW + 2 * ONE_MINUTE_MS,
+  );
+  expect(eatingSession.startAt).toBe(FIXED_NOW);
+  expect(eatingSession.plannedEndAt).toBe(FIXED_NOW + ONE_MINUTE_MS);
   expect(DEFAULT_FASTING_MINUTES).toBe(16 * 60);
+  expect(DEFAULT_EATING_MINUTES).toBe(8 * 60);
+});
+
+test('创建进食窗口使用传入时间和正式 8 小时默认时长', () => {
+  const session = createEatingSession(FIXED_NOW);
+
+  expect(session).toEqual({
+    id: `eating-${FIXED_NOW}`,
+    status: 'eating',
+    startAt: FIXED_NOW,
+    plannedEndAt: FIXED_NOW + 8 * ONE_HOUR_MS,
+  });
+});
+
+test('自定义 14 小时断食时自动形成 14:10 的完整一天', () => {
+  const plan = createCyclePlanFromFastingHours(14);
+
+  expect(plan).toEqual({
+    fastingMinutes: 14 * 60,
+    eatingMinutes: 10 * 60,
+  });
+  expect(getSessionDurationMinutes(plan, 'fasting')).toBe(14 * 60);
+  expect(getSessionDurationMinutes(plan, 'eating')).toBe(10 * 60);
+});
+
+test.each([0, 24, 14.5, Number.NaN])(
+  '非法断食小时数 %s 不会生成计划',
+  fastingHours => {
+    expect(() => createCyclePlanFromFastingHours(fastingHours)).toThrow(
+      RangeError,
+    );
+  },
+);
+
+test('修改开始时间时保留会话身份并按计划重算结束时间', () => {
+  const originalSession = createFastingSession(FIXED_NOW);
+  const adjustedStartAt = FIXED_NOW - 2 * ONE_HOUR_MS;
+
+  expect(
+    updateCycleSessionStart(originalSession, adjustedStartAt, 14 * 60),
+  ).toEqual({
+    ...originalSession,
+    startAt: adjustedStartAt,
+    plannedEndAt: adjustedStartAt + 14 * ONE_HOUR_MS,
+  });
 });
 
 test('刚开始时已进行为零，剩余为完整时长', () => {

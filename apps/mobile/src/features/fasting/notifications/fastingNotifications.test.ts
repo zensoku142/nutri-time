@@ -5,10 +5,10 @@ import * as Notifications from 'expo-notifications';
 import type {PermissionStatus} from 'expo';
 
 import {
-  cancelFastingCompletionNotification,
-  isFastingCompletionNotificationScheduled,
-  requestFastingNotificationPermission,
-  scheduleFastingCompletionNotification,
+  cancelCycleCompletionNotification,
+  isCycleCompletionNotificationScheduled,
+  requestCycleNotificationPermission,
+  scheduleCycleCompletionNotification,
 } from './fastingNotifications';
 
 jest.mock('expo-notifications', () => ({
@@ -39,7 +39,7 @@ test('先建立 Android 通知渠道，再检查已有权限', async () => {
     status: 'granted' as PermissionStatus,
   });
 
-  await expect(requestFastingNotificationPermission()).resolves.toBe(true);
+  await expect(requestCycleNotificationPermission()).resolves.toBe(true);
 
   expect(
     notificationsMock.setNotificationChannelAsync.mock.invocationCallOrder[0],
@@ -71,23 +71,44 @@ test('系统允许继续询问时请求权限，并返回用户的选择', async
     status: 'denied' as PermissionStatus,
   });
 
-  await expect(requestFastingNotificationPermission()).resolves.toBe(false);
+  await expect(requestCycleNotificationPermission()).resolves.toBe(false);
   expect(notificationsMock.requestPermissionsAsync).toHaveBeenCalledTimes(1);
 });
 
-test('安排一次目标时间提醒并使用不含健康详情的文案', async () => {
+test('安排 fasting 目标提醒并使用不含健康详情的文案', async () => {
   notificationsMock.scheduleNotificationAsync.mockResolvedValue(
     'notification-1',
   );
 
   await expect(
-    scheduleFastingCompletionNotification(PLANNED_END_AT),
+    scheduleCycleCompletionNotification(PLANNED_END_AT, 'fasting'),
   ).resolves.toBe('notification-1');
 
   expect(notificationsMock.scheduleNotificationAsync).toHaveBeenCalledWith({
     content: {
       title: 'NutriTime',
-      body: '你设定的目标时间到了。',
+      body: '断食目标已达成。',
+      sound: 'default',
+    },
+    trigger: {
+      type: 'date',
+      date: PLANNED_END_AT,
+      channelId: 'fasting-completion',
+    },
+  });
+});
+
+test('eating 使用同一渠道但显示进食窗口结束文案', async () => {
+  notificationsMock.scheduleNotificationAsync.mockResolvedValue(
+    'notification-eating',
+  );
+
+  await scheduleCycleCompletionNotification(PLANNED_END_AT, 'eating');
+
+  expect(notificationsMock.scheduleNotificationAsync).toHaveBeenCalledWith({
+    content: {
+      title: 'NutriTime',
+      body: '进食窗口已结束。',
       sound: 'default',
     },
     trigger: {
@@ -105,9 +126,9 @@ test('按系统取件号码查询和取消对应提醒', async () => {
   notificationsMock.cancelScheduledNotificationAsync.mockResolvedValue();
 
   await expect(
-    isFastingCompletionNotificationScheduled('notification-1'),
+    isCycleCompletionNotificationScheduled('notification-1'),
   ).resolves.toBe(true);
-  await cancelFastingCompletionNotification('notification-1');
+  await cancelCycleCompletionNotification('notification-1');
 
   expect(
     notificationsMock.cancelScheduledNotificationAsync,

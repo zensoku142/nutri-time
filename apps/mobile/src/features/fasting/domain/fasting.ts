@@ -8,7 +8,30 @@ export type FastingSession = {
   plannedEndAt: number;
 };
 
+export type EatingSession = {
+  id: string;
+  status: 'eating';
+  startAt: number;
+  plannedEndAt: number;
+};
+
+// 判别联合（用 status 区分两种合法形状）让后续代码不能把断食和进食窗口的字段混在一起。
+export type ActiveCycleSession = FastingSession | EatingSession;
+
 export const DEFAULT_FASTING_MINUTES = 16 * 60;
+export const DEFAULT_EATING_MINUTES = 8 * 60;
+export const MIN_FASTING_HOURS = 1;
+export const MAX_FASTING_HOURS = 23;
+
+export type CyclePlan = {
+  fastingMinutes: number;
+  eatingMinutes: number;
+};
+
+export const DEFAULT_CYCLE_PLAN: CyclePlan = {
+  fastingMinutes: DEFAULT_FASTING_MINUTES,
+  eatingMinutes: DEFAULT_EATING_MINUTES,
+};
 
 const MILLISECONDS_PER_MINUTE = 60 * 1000;
 const MILLISECONDS_PER_SECOND = 1000;
@@ -27,6 +50,58 @@ export function createFastingSession(
     status: 'fasting',
     startAt: now,
     plannedEndAt: now + durationMinutes * MILLISECONDS_PER_MINUTE,
+  };
+}
+
+export function createEatingSession(
+  now: number,
+  durationMinutes = DEFAULT_EATING_MINUTES,
+): EatingSession {
+  // 进食窗口从用户明确结束断食的这一刻开始，不沿用断食目标时间，避免用户晚确认时少掉可进食时间。
+  return {
+    id: `eating-${now}`,
+    status: 'eating',
+    startAt: now,
+    plannedEndAt: now + durationMinutes * MILLISECONDS_PER_MINUTE,
+  };
+}
+
+// ---------- 自定义周期 ----------
+export function createCyclePlanFromFastingHours(
+  fastingHours: number,
+): CyclePlan {
+  if (
+    !Number.isInteger(fastingHours) ||
+    fastingHours < MIN_FASTING_HOURS ||
+    fastingHours > MAX_FASTING_HOURS
+  ) {
+    throw new RangeError('断食小时数必须是 1 到 23 之间的整数');
+  }
+
+  // 一天仍固定为 24 小时；用户调整断食时长后，进食窗口自动补足剩余时间，避免出现含义不清的空档。
+  return {
+    fastingMinutes: fastingHours * 60,
+    eatingMinutes: (24 - fastingHours) * 60,
+  };
+}
+
+export function getSessionDurationMinutes(
+  plan: CyclePlan,
+  status: ActiveCycleSession['status'],
+): number {
+  return status === 'fasting' ? plan.fastingMinutes : plan.eatingMinutes;
+}
+
+export function updateCycleSessionStart(
+  session: ActiveCycleSession,
+  startAt: number,
+  durationMinutes: number,
+): ActiveCycleSession {
+  // 修改开始时间或计划比例时保留同一个会话 ID，避免把一次连续阶段误认为新建了历史记录。
+  return {
+    ...session,
+    startAt,
+    plannedEndAt: startAt + durationMinutes * MILLISECONDS_PER_MINUTE,
   };
 }
 

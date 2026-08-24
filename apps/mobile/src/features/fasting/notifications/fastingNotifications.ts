@@ -1,8 +1,13 @@
-// ==================== 断食目标提醒 ====================
+// ==================== 周期目标提醒 ====================
 // Expo Notifications（把提醒交给 Android 系统安排的官方工具）集中在这里调用，页面只关心成功或失败。
 
 import * as Notifications from 'expo-notifications';
 
+import type {ActiveCycleSession} from '../domain/fasting';
+
+type CycleStage = ActiveCycleSession['status'];
+
+// 沿用原渠道 ID，系统升级后不会留下两套同类渠道或让用户重新配置声音。
 const FASTING_COMPLETION_CHANNEL_ID = 'fasting-completion';
 
 // App 正在前台时 Android 也要显示到期提醒；后台和关闭页面后的展示仍由系统接管。
@@ -16,7 +21,7 @@ Notifications.setNotificationHandler({
 });
 
 // ---------- 权限与渠道 ----------
-async function configureFastingNotificationChannel(): Promise<void> {
+async function configureCycleNotificationChannel(): Promise<void> {
   // 通知渠道是 Android 管理同类通知声音和重要程度的分类；先建渠道，Android 13 才能正确显示权限询问。
   await Notifications.setNotificationChannelAsync(
     FASTING_COMPLETION_CHANNEL_ID,
@@ -28,8 +33,8 @@ async function configureFastingNotificationChannel(): Promise<void> {
   );
 }
 
-export async function requestFastingNotificationPermission(): Promise<boolean> {
-  await configureFastingNotificationChannel();
+export async function requestCycleNotificationPermission(): Promise<boolean> {
+  await configureCycleNotificationChannel();
 
   const currentPermission = await Notifications.getPermissionsAsync();
 
@@ -46,16 +51,18 @@ export async function requestFastingNotificationPermission(): Promise<boolean> {
 }
 
 // ---------- 安排与取消 ----------
-export async function scheduleFastingCompletionNotification(
+export async function scheduleCycleCompletionNotification(
   plannedEndAt: number,
+  stage: CycleStage,
 ): Promise<string> {
   // 调用方通常已在请求权限前建好渠道，这里再次确认是为了让单独调用也不会落入系统的模糊默认分类。
-  await configureFastingNotificationChannel();
+  await configureCycleNotificationChannel();
 
   return Notifications.scheduleNotificationAsync({
     content: {
       title: 'NutriTime',
-      body: '你设定的目标时间到了。',
+      body:
+        stage === 'fasting' ? '断食目标已达成。' : '进食窗口已结束。',
       sound: 'default',
     },
     trigger: {
@@ -66,7 +73,7 @@ export async function scheduleFastingCompletionNotification(
   });
 }
 
-export async function isFastingCompletionNotificationScheduled(
+export async function isCycleCompletionNotificationScheduled(
   notificationId: string,
 ): Promise<boolean> {
   const scheduledNotifications =
@@ -77,7 +84,7 @@ export async function isFastingCompletionNotificationScheduled(
   );
 }
 
-export async function cancelFastingCompletionNotification(
+export async function cancelCycleCompletionNotification(
   notificationId: string,
 ): Promise<void> {
   await Notifications.cancelScheduledNotificationAsync(notificationId);

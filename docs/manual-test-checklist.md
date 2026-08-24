@@ -1,6 +1,70 @@
 # 手机端手工验收清单
 
-## 当前验收边界
+## 阶段 8 当前结论
+
+- [x] Android 手机端已实现 `idle → fasting → eating → idle` 完整周期；默认 16:8，也可改为 14:10 等整小时比例。
+- [x] fasting 和 eating 到零后只显示阶段完成，不自动切换；用户仍需明确点击。
+- [x] 顶部比例入口和活动开始时间都可修改；确认后先保存，再更新页面、结束时间和唯一提醒。
+- [x] Wear v1 仍只支持 idle/fasting。手机进入 eating 时 urgent 提交兼容 idle；这不代表 Wear 已支持 eating。
+- [x] 本次没有修改 `apps/wear`，也没有实现后端、历史、云同步或双向操作。
+
+## 阶段 8 实测环境
+
+- 日期：2026-08-24。
+- 手机：`Pixel_8` AVD，serial 为 `emulator-5554`，Android 16 / API 36，1080 × 2400。
+- 构建：Android x86_64 Development Build，applicationId 为 `com.zensoku.nutritime`。
+- Wear：没有连接 Wear 设备；Data Layer 提交失败按预期不回滚手机状态。
+- 模拟器验收结束后回到 idle，通知权限恢复为 allow，系统没有当前 NutriTime 提醒。
+
+## 阶段 8 完整周期与自定义时间
+
+- [x] 默认值仍是 16 小时 fasting 和 8 小时 eating；自动测试也验证 14:10 自定义比例。
+- [x] 模拟器把活动中的 16:8 改为 14:10 后，原开始时间不变，计划结束从 18:35 重算为 16:35。
+- [x] 模拟器把 fasting 开始时间从 02:35 改为 01:35 后，结束时间继续按 14 小时重算为 15:35。
+- [x] 两种修改都先取消旧提醒，再安排一条新提醒；`dumpsys alarm` 每次只存在一条当前 NutriTime `RTC_WAKEUP`。
+- [x] 14:10 fasting 强停重开后恢复相同开始/结束时间和一条提醒。
+- [x] 快速连续点击“结束断食”只进入一次 eating，没有立刻被第二次点击结束。
+- [x] eating 使用 10 小时时长，开始 03:04、计划结束 13:04，并把 fasting 提醒替换成一条 eating 提醒。
+- [x] 14:10 eating 强停重开后恢复相同阶段与一条提醒；结束 eating 后回到 idle 且当前提醒消失，自定义 14:10 仍保留。
+- [x] 通知权限固定拒绝时，14:10 fasting 仍正常开始，页面显示“提醒未启用”，系统没有当前 NutriTime 提醒。
+- [x] fasting/eating 的一秒短时长由组件测试注入；到零分别显示“断食目标已达成”和“进食窗口已结束”，不出现负数，也不自动迁移。
+
+## 阶段 8 存储与兼容
+
+- [x] 活动状态继续使用 `@nutritime/fasting/current`；新 fasting/eating 写入 `storageVersion: 2`。
+- [x] 合法 v1 fasting 读取后保留 ID、开始、结束和通知 ID，并写回 v2；迁移写回失败仍先恢复旧断食。
+- [x] 自定义比例使用 `@nutritime/cycle/plan`，与当前活动状态职责分开；结束 eating 不清除比例。
+- [x] 活动中修改比例使用一次批量写入保存比例和重算后的阶段，失败时保留原页面和旧提醒。
+- [x] 未知版本、损坏会话或损坏自定义比例继续显示明确错误，只有用户确认重置才删除。
+- [x] session 和本地存储都没有 `remainingSeconds`；每秒刷新不写 AsyncStorage、通知或 DataItem。
+
+## 阶段 8 自动验证
+
+```powershell
+Set-Location E:\github\NutriTime\apps\mobile
+pnpm test -- --runInBand
+pnpm typecheck
+pnpm lint
+node_modules\.bin\expo.cmd install --check
+node_modules\.bin\expo.cmd config --type public
+pnpm prebuild:android
+
+Set-Location android
+.\gradlew.bat :app:assembleDebug -PreactNativeArchitectures=x86_64 --no-daemon
+.\gradlew.bat :wear-data-layer:testDebugUnitTest --no-daemon
+```
+
+结果：
+
+- Jest：10 个测试套件、110 个测试全部通过。
+- TypeScript：通过。
+- lint：0 个错误；2 个警告仍来自 Kotlin 测试生成报告，不是维护源码。
+- Expo 依赖、公共配置和干净 Prebuild/CNG：通过。
+- Android x86_64 Development Build：`BUILD SUCCESSFUL`。
+- 手机本地 Wear Data Layer 模块测试：`BUILD SUCCESSFUL`。
+- 参考图视觉 QA：`design-qa.md` 的 `final result: passed`。
+
+## 阶段 7 历史验收边界
 
 - [x] 本文只记录 Android 手机端 16 小时断食技术 MVP 的已完成验收。
 - [x] 当前不是完整 16:8；8 小时 `eating` 状态属于阶段 8，本次没有实现或验收。
@@ -125,10 +189,10 @@ Set-Location ..
 - 手机本地 Expo Module Kotlin 测试：`BUILD SUCCESSFUL`。
 - APK 权限检查：没有 exact alarm 权限。
 
-## 未完成且本次不得宣称完成
+## 阶段 7 当时未完成的项目
 
 - Wear 正式读取与解析 `/fasting/current`。
 - Wear last good state、未知版本和非法字段保护。
 - 手机—手表真实开始、结束、晚启动和断连重连联调。
 - 完整阶段 7；它仍需上述 Wear 部分完成。
-- 8 小时进食窗口和完整 16:8；它属于阶段 8。
+- 8 小时进食窗口和完整 16:8 在阶段 7 当时尚未完成；Android 手机端现已由阶段 8 补齐。

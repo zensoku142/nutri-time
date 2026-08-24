@@ -15,7 +15,16 @@ jest.mock('react-native-safe-area-context', () =>
 // 完整入口测试不碰真实手机存储；空抽屉替身让页面完成启动恢复后再检查首页。
 jest.mock('../src/features/fasting/storage/fastingStorage', () => ({
   clearCurrentFastingState: jest.fn(),
+  readCyclePlan: jest.fn(() =>
+    Promise.resolve({
+      status: 'default',
+      plan: {fastingMinutes: 16 * 60, eatingMinutes: 8 * 60},
+    }),
+  ),
   readCurrentFastingState: jest.fn(() => Promise.resolve({status: 'empty'})),
+  resetCurrentCycleData: jest.fn(),
+  saveCyclePlan: jest.fn(),
+  saveCyclePlanAndCurrentState: jest.fn(),
   saveCurrentFastingState: jest.fn(),
 }));
 

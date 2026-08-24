@@ -8,19 +8,23 @@ import ReactTestRenderer from 'react-test-renderer';
 
 import {syncCurrentFasting} from '../../../../modules/wear-data-layer';
 import {theme} from '../../../app/theme';
-import type {FastingSession} from '../domain/fasting';
+import type {ActiveCycleSession, FastingSession} from '../domain/fasting';
 import {
-  cancelFastingCompletionNotification,
-  isFastingCompletionNotificationScheduled,
-  requestFastingNotificationPermission,
-  scheduleFastingCompletionNotification,
+  cancelCycleCompletionNotification,
+  isCycleCompletionNotificationScheduled,
+  requestCycleNotificationPermission,
+  scheduleCycleCompletionNotification,
 } from '../notifications/fastingNotifications';
 import {
   clearCurrentFastingState,
+  readCyclePlan,
   readCurrentFastingState,
+  resetCurrentCycleData,
+  saveCyclePlan,
+  saveCyclePlanAndCurrentState,
   saveCurrentFastingState,
 } from '../storage/fastingStorage';
-import type {PersistedFastingState} from '../storage/fastingStorage';
+import type {PersistedCycleState} from '../storage/fastingStorage';
 import {FastingScreen} from './FastingScreen';
 
 jest.mock('react-native-safe-area-context', () =>
@@ -29,15 +33,19 @@ jest.mock('react-native-safe-area-context', () =>
 
 jest.mock('../storage/fastingStorage', () => ({
   clearCurrentFastingState: jest.fn(),
+  readCyclePlan: jest.fn(),
   readCurrentFastingState: jest.fn(),
+  resetCurrentCycleData: jest.fn(),
+  saveCyclePlan: jest.fn(),
+  saveCyclePlanAndCurrentState: jest.fn(),
   saveCurrentFastingState: jest.fn(),
 }));
 
 jest.mock('../notifications/fastingNotifications', () => ({
-  cancelFastingCompletionNotification: jest.fn(),
-  isFastingCompletionNotificationScheduled: jest.fn(),
-  requestFastingNotificationPermission: jest.fn(),
-  scheduleFastingCompletionNotification: jest.fn(),
+  cancelCycleCompletionNotification: jest.fn(),
+  isCycleCompletionNotificationScheduled: jest.fn(),
+  requestCycleNotificationPermission: jest.fn(),
+  scheduleCycleCompletionNotification: jest.fn(),
 }));
 
 jest.mock('../../../../modules/wear-data-layer', () => ({
@@ -48,6 +56,9 @@ const clearCurrentFastingStateMock =
   clearCurrentFastingState as jest.MockedFunction<
     typeof clearCurrentFastingState
   >;
+const readCyclePlanMock = readCyclePlan as jest.MockedFunction<
+  typeof readCyclePlan
+>;
 const readCurrentFastingStateMock =
   readCurrentFastingState as jest.MockedFunction<
     typeof readCurrentFastingState
@@ -56,39 +67,56 @@ const saveCurrentFastingStateMock =
   saveCurrentFastingState as jest.MockedFunction<
     typeof saveCurrentFastingState
   >;
-const cancelFastingCompletionNotificationMock =
-  cancelFastingCompletionNotification as jest.MockedFunction<
-    typeof cancelFastingCompletionNotification
+const resetCurrentCycleDataMock = resetCurrentCycleData as jest.MockedFunction<
+  typeof resetCurrentCycleData
+>;
+const saveCyclePlanMock = saveCyclePlan as jest.MockedFunction<
+  typeof saveCyclePlan
+>;
+const saveCyclePlanAndCurrentStateMock =
+  saveCyclePlanAndCurrentState as jest.MockedFunction<
+    typeof saveCyclePlanAndCurrentState
   >;
-const isFastingCompletionNotificationScheduledMock =
-  isFastingCompletionNotificationScheduled as jest.MockedFunction<
-    typeof isFastingCompletionNotificationScheduled
+const cancelCycleCompletionNotificationMock =
+  cancelCycleCompletionNotification as jest.MockedFunction<
+    typeof cancelCycleCompletionNotification
   >;
-const requestFastingNotificationPermissionMock =
-  requestFastingNotificationPermission as jest.MockedFunction<
-    typeof requestFastingNotificationPermission
+const isCycleCompletionNotificationScheduledMock =
+  isCycleCompletionNotificationScheduled as jest.MockedFunction<
+    typeof isCycleCompletionNotificationScheduled
   >;
-const scheduleFastingCompletionNotificationMock =
-  scheduleFastingCompletionNotification as jest.MockedFunction<
-    typeof scheduleFastingCompletionNotification
+const requestCycleNotificationPermissionMock =
+  requestCycleNotificationPermission as jest.MockedFunction<
+    typeof requestCycleNotificationPermission
+  >;
+const scheduleCycleCompletionNotificationMock =
+  scheduleCycleCompletionNotification as jest.MockedFunction<
+    typeof scheduleCycleCompletionNotification
   >;
 const syncCurrentFastingMock = jest.mocked(syncCurrentFasting);
 
 const FIXED_NOW = new Date(2026, 7, 23, 20, 0, 0).getTime();
 const DEFAULT_FASTING_MS = 16 * 60 * 60 * 1000;
+const DEFAULT_EATING_MS = 8 * 60 * 60 * 1000;
 const VALID_SESSION: FastingSession = {
   id: `fasting-${FIXED_NOW}`,
   status: 'fasting',
   startAt: FIXED_NOW,
   plannedEndAt: FIXED_NOW + DEFAULT_FASTING_MS,
 };
+const VALID_EATING_SESSION: ActiveCycleSession = {
+  id: `eating-${FIXED_NOW}`,
+  status: 'eating',
+  startAt: FIXED_NOW,
+  plannedEndAt: FIXED_NOW + DEFAULT_EATING_MS,
+};
 const VALID_PERSISTED_STATE = {
-  storageVersion: 1 as const,
+  storageVersion: 2 as const,
   session: VALID_SESSION,
 };
 
 function restoredState(
-  state: PersistedFastingState = VALID_PERSISTED_STATE,
+  state: PersistedCycleState = VALID_PERSISTED_STATE,
 ): Awaited<ReturnType<typeof readCurrentFastingState>> {
   return {status: 'restored', session: state.session, state};
 }
@@ -146,14 +174,21 @@ beforeEach(() => {
   jest.useFakeTimers();
   jest.setSystemTime(FIXED_NOW);
   readCurrentFastingStateMock.mockResolvedValue({status: 'empty'});
+  readCyclePlanMock.mockResolvedValue({
+    status: 'default',
+    plan: {fastingMinutes: 16 * 60, eatingMinutes: 8 * 60},
+  });
   saveCurrentFastingStateMock.mockResolvedValue();
+  saveCyclePlanMock.mockResolvedValue();
+  saveCyclePlanAndCurrentStateMock.mockResolvedValue();
   clearCurrentFastingStateMock.mockResolvedValue();
-  requestFastingNotificationPermissionMock.mockResolvedValue(false);
-  scheduleFastingCompletionNotificationMock.mockResolvedValue(
+  resetCurrentCycleDataMock.mockResolvedValue();
+  requestCycleNotificationPermissionMock.mockResolvedValue(false);
+  scheduleCycleCompletionNotificationMock.mockResolvedValue(
     'notification-1',
   );
-  isFastingCompletionNotificationScheduledMock.mockResolvedValue(true);
-  cancelFastingCompletionNotificationMock.mockResolvedValue();
+  isCycleCompletionNotificationScheduledMock.mockResolvedValue(true);
+  cancelCycleCompletionNotificationMock.mockResolvedValue();
   syncCurrentFastingMock.mockResolvedValue();
 });
 
@@ -170,13 +205,13 @@ test('启动读取完成前只显示 loading，不先闪现 idle', async () => {
 
   const renderer = await renderScreen();
 
-  expect(getRenderedText(renderer)).toContain('正在恢复断食状态');
+  expect(getRenderedText(renderer)).toContain('正在恢复周期状态');
   expect(
     renderer.root.findAllByProps({accessibilityLabel: '开始断食'}),
   ).toHaveLength(0);
   expect(
     renderer.root.findAllByProps({
-      accessibilityLabel: '当前断食状态：16 小时断食',
+      accessibilityLabel: '当前周期状态：16:8 轻断食',
     }),
   ).toHaveLength(0);
 
@@ -204,6 +239,188 @@ test('没有本地数据时读取完成后进入 idle', async () => {
   ReactTestRenderer.act(() => renderer.unmount());
 });
 
+test('恢复自定义 14:10 计划并用它创建新的 fasting', async () => {
+  readCyclePlanMock.mockResolvedValue({
+    status: 'restored',
+    plan: {fastingMinutes: 14 * 60, eatingMinutes: 10 * 60},
+  });
+  const renderer = await renderScreen();
+
+  expect(getRenderedText(renderer)).toContain('14:10 · 修改');
+  expect(getRenderedText(renderer)).toContain('14:00:00');
+
+  pressButton(renderer, '开始断食');
+  await flushPromises();
+
+  expect(saveCurrentFastingStateMock).toHaveBeenCalledWith({
+    id: `fasting-${FIXED_NOW}`,
+    status: 'fasting',
+    startAt: FIXED_NOW,
+    plannedEndAt: FIXED_NOW + 14 * 60 * 60 * 1000,
+  });
+
+  ReactTestRenderer.act(() => renderer.unmount());
+});
+
+test('空闲时可从底部弹层把默认 16:8 修改为 14:10', async () => {
+  const renderer = await renderScreen();
+
+  pressButton(renderer, '修改断食和进食时长');
+  expect(getRenderedText(renderer)).toContain('修改周期时长');
+
+  pressButton(renderer, '减少断食 1 小时');
+  pressButton(renderer, '减少断食 1 小时');
+  expect(getRenderedText(renderer)).toContain('"14",":","10"');
+
+  pressButton(renderer, '确认修改');
+  await flushPromises();
+
+  expect(saveCyclePlanMock).toHaveBeenCalledWith({
+    fastingMinutes: 14 * 60,
+    eatingMinutes: 10 * 60,
+  });
+  expect(getRenderedText(renderer)).toContain('14:10 · 修改');
+
+  ReactTestRenderer.act(() => renderer.unmount());
+});
+
+test('活动中修改比例会批量保存当前阶段、切换提醒并 urgent 更新 fasting', async () => {
+  requestCycleNotificationPermissionMock.mockResolvedValue(true);
+  readCurrentFastingStateMock.mockResolvedValue(
+    restoredState({
+      ...VALID_PERSISTED_STATE,
+      completionNotificationId: 'notification-fasting',
+    }),
+  );
+  const renderer = await renderScreen();
+
+  pressButton(renderer, '修改断食和进食时长');
+  pressButton(renderer, '减少断食 1 小时');
+  pressButton(renderer, '减少断食 1 小时');
+  pressButton(renderer, '确认修改');
+  await flushPromises();
+
+  const adjustedSession = {
+    ...VALID_SESSION,
+    plannedEndAt: FIXED_NOW + 14 * 60 * 60 * 1000,
+  };
+  expect(saveCyclePlanAndCurrentStateMock).toHaveBeenCalledWith(
+    {fastingMinutes: 14 * 60, eatingMinutes: 10 * 60},
+    {storageVersion: 2, session: adjustedSession},
+  );
+  expect(cancelCycleCompletionNotificationMock).toHaveBeenCalledWith(
+    'notification-fasting',
+  );
+  expect(scheduleCycleCompletionNotificationMock).toHaveBeenCalledWith(
+    adjustedSession.plannedEndAt,
+    'fasting',
+  );
+  expect(syncCurrentFastingMock).toHaveBeenLastCalledWith(
+    {
+      protocolVersion: 1,
+      status: 'fasting',
+      sessionId: adjustedSession.id,
+      startAt: adjustedSession.startAt,
+      plannedEndAt: adjustedSession.plannedEndAt,
+      stateChangedAt: FIXED_NOW,
+    },
+    true,
+  );
+
+  ReactTestRenderer.act(() => renderer.unmount());
+});
+
+test('修改 fasting 开始时间会保留会话 ID、重算结束时间并切换提醒', async () => {
+  requestCycleNotificationPermissionMock.mockResolvedValue(true);
+  readCurrentFastingStateMock.mockResolvedValue(
+    restoredState({
+      ...VALID_PERSISTED_STATE,
+      completionNotificationId: 'notification-fasting',
+    }),
+  );
+  const renderer = await renderScreen();
+
+  pressButton(renderer, '修改断食开始时间');
+  expect(getRenderedText(renderer)).toContain('修改断食开始时间');
+  pressButton(renderer, '选择前一小时');
+  pressButton(renderer, '确认修改');
+  await flushPromises();
+
+  const adjustedSession = {
+    ...VALID_SESSION,
+    startAt: FIXED_NOW - 60 * 60 * 1000,
+    plannedEndAt: FIXED_NOW + 15 * 60 * 60 * 1000,
+  };
+  expect(saveCurrentFastingStateMock).toHaveBeenCalledWith(adjustedSession);
+  expect(cancelCycleCompletionNotificationMock).toHaveBeenCalledWith(
+    'notification-fasting',
+  );
+  expect(scheduleCycleCompletionNotificationMock).toHaveBeenCalledWith(
+    adjustedSession.plannedEndAt,
+    'fasting',
+  );
+  expect(syncCurrentFastingMock).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      status: 'fasting',
+      startAt: adjustedSession.startAt,
+      plannedEndAt: adjustedSession.plannedEndAt,
+    }),
+    true,
+  );
+
+  ReactTestRenderer.act(() => renderer.unmount());
+});
+
+test('开始时间晚于当前时间时保持编辑弹层且不写入', async () => {
+  readCurrentFastingStateMock.mockResolvedValue(restoredState());
+  const renderer = await renderScreen();
+
+  pressButton(renderer, '修改断食开始时间');
+  pressButton(renderer, '选择后一小时');
+  pressButton(renderer, '确认修改');
+  await flushPromises();
+
+  expect(getRenderedText(renderer)).toContain('开始时间不能晚于当前时间');
+  expect(saveCurrentFastingStateMock).not.toHaveBeenCalled();
+  expect(cancelCycleCompletionNotificationMock).not.toHaveBeenCalled();
+
+  ReactTestRenderer.act(() => renderer.unmount());
+});
+
+test('自定义计划或开始时间保存失败时保留原值和旧提醒', async () => {
+  readCurrentFastingStateMock.mockResolvedValue(
+    restoredState({
+      ...VALID_PERSISTED_STATE,
+      completionNotificationId: 'notification-fasting',
+    }),
+  );
+  saveCyclePlanAndCurrentStateMock.mockRejectedValue(
+    new Error('plan write failed'),
+  );
+  const renderer = await renderScreen();
+
+  pressButton(renderer, '修改断食和进食时长');
+  pressButton(renderer, '减少断食 1 小时');
+  pressButton(renderer, '确认修改');
+  await flushPromises();
+
+  expect(getRenderedText(renderer)).toContain('周期时长保存失败');
+  expect(getRenderedText(renderer)).toContain('16:8');
+  expect(cancelCycleCompletionNotificationMock).not.toHaveBeenCalled();
+
+  pressButton(renderer, '取消修改');
+  saveCurrentFastingStateMock.mockRejectedValue(new Error('write failed'));
+  pressButton(renderer, '修改断食开始时间');
+  pressButton(renderer, '选择前一小时');
+  pressButton(renderer, '确认修改');
+  await flushPromises();
+
+  expect(getRenderedText(renderer)).toContain('开始时间保存失败');
+  expect(cancelCycleCompletionNotificationMock).not.toHaveBeenCalled();
+
+  ReactTestRenderer.act(() => renderer.unmount());
+});
+
 test('合法数据恢复为 fasting 并保留原开始和结束时间', async () => {
   const setIntervalSpy = jest.spyOn(globalThis, 'setInterval');
   const clearIntervalSpy = jest.spyOn(globalThis, 'clearInterval');
@@ -211,10 +428,10 @@ test('合法数据恢复为 fasting 并保留原开始和结束时间', async ()
 
   const renderer = await renderScreen();
 
-  expect(getRenderedText(renderer)).toContain('断食进行中');
+  expect(getRenderedText(renderer)).toContain('断食已进行');
   expect(getRenderedText(renderer)).toContain('08/23 20:00');
   expect(getRenderedText(renderer)).toContain('08/24 12:00');
-  expect(getRenderedText(renderer)).toContain('还剩 16:00:00');
+  expect(getRenderedText(renderer)).toContain('16:00:00');
   expect(setIntervalSpy).toHaveBeenCalledTimes(1);
   expect(syncCurrentFastingMock).toHaveBeenCalledWith(
     {
@@ -232,6 +449,29 @@ test('合法数据恢复为 fasting 并保留原开始和结束时间', async ()
   expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
 });
 
+test('合法 eating 数据恢复进食窗口，并向 Wear v1 普通提交 idle', async () => {
+  readCurrentFastingStateMock.mockResolvedValue(
+    restoredState({storageVersion: 2, session: VALID_EATING_SESSION}),
+  );
+
+  const renderer = await renderScreen();
+
+  expect(getRenderedText(renderer)).toContain('进食窗口');
+  expect(getRenderedText(renderer)).toContain('08:00:00');
+  expect(getRenderedText(renderer)).toContain('08/24 04:00');
+  expect(syncCurrentFastingMock).toHaveBeenCalledWith(
+    {
+      protocolVersion: 1,
+      status: 'idle',
+      stateChangedAt: VALID_EATING_SESSION.startAt,
+    },
+    false,
+  );
+  expect(clearCurrentFastingStateMock).not.toHaveBeenCalled();
+
+  ReactTestRenderer.act(() => renderer.unmount());
+});
+
 test('恢复时已有有效提醒不会重复安排', async () => {
   readCurrentFastingStateMock.mockResolvedValue(
     restoredState({
@@ -242,12 +482,12 @@ test('恢复时已有有效提醒不会重复安排', async () => {
 
   const renderer = await renderScreen();
 
-  expect(getRenderedText(renderer)).toContain('断食进行中');
-  expect(isFastingCompletionNotificationScheduledMock).toHaveBeenCalledWith(
+  expect(getRenderedText(renderer)).toContain('断食已进行');
+  expect(isCycleCompletionNotificationScheduledMock).toHaveBeenCalledWith(
     'notification-1',
   );
-  expect(requestFastingNotificationPermissionMock).not.toHaveBeenCalled();
-  expect(scheduleFastingCompletionNotificationMock).not.toHaveBeenCalled();
+  expect(requestCycleNotificationPermissionMock).not.toHaveBeenCalled();
+  expect(scheduleCycleCompletionNotificationMock).not.toHaveBeenCalled();
   expect(saveCurrentFastingStateMock).not.toHaveBeenCalled();
 
   ReactTestRenderer.act(() => renderer.unmount());
@@ -255,7 +495,7 @@ test('恢复时已有有效提醒不会重复安排', async () => {
 
 test('恢复核对失败时仍恢复会话，并且不冒险重复安排', async () => {
   jest.spyOn(console, 'error').mockImplementation(() => undefined);
-  isFastingCompletionNotificationScheduledMock.mockRejectedValue(
+  isCycleCompletionNotificationScheduledMock.mockRejectedValue(
     new Error('query failed'),
   );
   readCurrentFastingStateMock.mockResolvedValue(
@@ -267,22 +507,22 @@ test('恢复核对失败时仍恢复会话，并且不冒险重复安排', async
 
   const renderer = await renderScreen();
 
-  expect(getRenderedText(renderer)).toContain('断食进行中');
+  expect(getRenderedText(renderer)).toContain('断食已进行');
   expect(getRenderedText(renderer)).toContain('提醒未启用');
-  expect(scheduleFastingCompletionNotificationMock).not.toHaveBeenCalled();
+  expect(scheduleCycleCompletionNotificationMock).not.toHaveBeenCalled();
 
   ReactTestRenderer.act(() => renderer.unmount());
 });
 
 test('恢复时缺少取件号码会补安排一次并写回', async () => {
-  requestFastingNotificationPermissionMock.mockResolvedValue(true);
+  requestCycleNotificationPermissionMock.mockResolvedValue(true);
   readCurrentFastingStateMock.mockResolvedValue(restoredState());
 
   const renderer = await renderScreen();
 
-  expect(getRenderedText(renderer)).toContain('断食进行中');
-  expect(isFastingCompletionNotificationScheduledMock).not.toHaveBeenCalled();
-  expect(scheduleFastingCompletionNotificationMock).toHaveBeenCalledTimes(1);
+  expect(getRenderedText(renderer)).toContain('断食已进行');
+  expect(isCycleCompletionNotificationScheduledMock).not.toHaveBeenCalled();
+  expect(scheduleCycleCompletionNotificationMock).toHaveBeenCalledTimes(1);
   expect(saveCurrentFastingStateMock).toHaveBeenCalledWith(
     VALID_SESSION,
     'notification-1',
@@ -292,8 +532,8 @@ test('恢复时缺少取件号码会补安排一次并写回', async () => {
 });
 
 test('恢复时取件号码对应的系统提醒不存在会补安排一次', async () => {
-  requestFastingNotificationPermissionMock.mockResolvedValue(true);
-  isFastingCompletionNotificationScheduledMock.mockResolvedValue(false);
+  requestCycleNotificationPermissionMock.mockResolvedValue(true);
+  isCycleCompletionNotificationScheduledMock.mockResolvedValue(false);
   readCurrentFastingStateMock.mockResolvedValue(
     restoredState({
       ...VALID_PERSISTED_STATE,
@@ -303,7 +543,7 @@ test('恢复时取件号码对应的系统提醒不存在会补安排一次', as
 
   const renderer = await renderScreen();
 
-  expect(scheduleFastingCompletionNotificationMock).toHaveBeenCalledTimes(1);
+  expect(scheduleCycleCompletionNotificationMock).toHaveBeenCalledTimes(1);
   expect(saveCurrentFastingStateMock).toHaveBeenCalledWith(
     VALID_SESSION,
     'notification-1',
@@ -320,21 +560,21 @@ test('恢复已经到期的会话时不为过去时间新增提醒', async () =>
     plannedEndAt: FIXED_NOW - 60 * 60 * 1000,
   };
   readCurrentFastingStateMock.mockResolvedValue(
-    restoredState({storageVersion: 1, session: expiredSession}),
+    restoredState({storageVersion: 2, session: expiredSession}),
   );
 
   const renderer = await renderScreen();
 
-  expect(getRenderedText(renderer)).toContain('目标已达成');
-  expect(isFastingCompletionNotificationScheduledMock).not.toHaveBeenCalled();
-  expect(requestFastingNotificationPermissionMock).not.toHaveBeenCalled();
-  expect(scheduleFastingCompletionNotificationMock).not.toHaveBeenCalled();
+  expect(getRenderedText(renderer)).toContain('断食目标已达成');
+  expect(isCycleCompletionNotificationScheduledMock).not.toHaveBeenCalled();
+  expect(requestCycleNotificationPermissionMock).not.toHaveBeenCalled();
+  expect(scheduleCycleCompletionNotificationMock).not.toHaveBeenCalled();
 
   ReactTestRenderer.act(() => renderer.unmount());
 });
 
 test('普通重渲染不会再次核对或安排提醒', async () => {
-  requestFastingNotificationPermissionMock.mockResolvedValue(true);
+  requestCycleNotificationPermissionMock.mockResolvedValue(true);
   readCurrentFastingStateMock.mockResolvedValue(restoredState());
   const renderer = await renderScreen();
 
@@ -343,7 +583,7 @@ test('普通重渲染不会再次核对或安排提醒', async () => {
   });
 
   expect(readCurrentFastingStateMock).toHaveBeenCalledTimes(1);
-  expect(scheduleFastingCompletionNotificationMock).toHaveBeenCalledTimes(1);
+  expect(scheduleCycleCompletionNotificationMock).toHaveBeenCalledTimes(1);
   expect(saveCurrentFastingStateMock).toHaveBeenCalledTimes(1);
   expect(syncCurrentFastingMock).toHaveBeenCalledTimes(1);
 
@@ -352,7 +592,7 @@ test('普通重渲染不会再次核对或安排提醒', async () => {
 
 test('恢复核对完成前不允许用户结束，避免旧结果覆盖新操作', async () => {
   const queryDeferred = createDeferred<boolean>();
-  isFastingCompletionNotificationScheduledMock.mockReturnValue(
+  isCycleCompletionNotificationScheduledMock.mockReturnValue(
     queryDeferred.promise,
   );
   readCurrentFastingStateMock.mockResolvedValue(
@@ -363,7 +603,7 @@ test('恢复核对完成前不允许用户结束，避免旧结果覆盖新操�
   );
   const renderer = await renderScreen();
 
-  expect(getRenderedText(renderer)).toContain('正在恢复断食状态');
+  expect(getRenderedText(renderer)).toContain('正在恢复周期状态');
   expect(
     renderer.root.findAllByProps({accessibilityLabel: '结束断食'}),
   ).toHaveLength(0);
@@ -386,7 +626,7 @@ test('开始时先保存，保存成功后页面才进入 fasting', async () => 
   const renderer = await renderScreen();
 
   const idleRing = renderer.root.findByProps({
-    accessibilityLabel: '当前断食状态：16 小时断食',
+    accessibilityLabel: '当前周期状态：16:8 轻断食',
   });
   const idleRingStyle = StyleSheet.flatten(idleRing.props.style);
   expect(idleRingStyle.width).toBe(idleRingStyle.height);
@@ -395,10 +635,11 @@ test('开始时先保存，保存成功后页面才进入 fasting', async () => 
 
   expect(saveCurrentFastingStateMock).toHaveBeenCalledTimes(1);
   expect(saveCurrentFastingStateMock).toHaveBeenCalledWith(VALID_SESSION);
-  expect(requestFastingNotificationPermissionMock).not.toHaveBeenCalled();
-  expect(getRenderedText(renderer)).not.toContain('断食进行中');
+  expect(requestCycleNotificationPermissionMock).not.toHaveBeenCalled();
+  expect(getRenderedText(renderer)).not.toContain('断食已进行');
   expect(
-    renderer.root.findByProps({accessibilityLabel: '正在开始…'}).props.disabled,
+    renderer.root.findByProps({accessibilityLabel: '正在开始断食…'}).props
+      .disabled,
   ).toBe(true);
 
   await ReactTestRenderer.act(async () => {
@@ -406,10 +647,10 @@ test('开始时先保存，保存成功后页面才进入 fasting', async () => 
     await saveDeferred.promise;
   });
 
-  expect(getRenderedText(renderer)).toContain('断食进行中');
+  expect(getRenderedText(renderer)).toContain('断食已进行');
   expect(getRenderedText(renderer)).toContain('已完成 0%');
-  expect(getRenderedText(renderer)).toContain('还剩 16:00:00');
-  expect(requestFastingNotificationPermissionMock).toHaveBeenCalledTimes(1);
+  expect(getRenderedText(renderer)).toContain('16:00:00');
+  expect(requestCycleNotificationPermissionMock).toHaveBeenCalledTimes(1);
   expect(setIntervalSpy).toHaveBeenCalledTimes(1);
   expect(syncCurrentFastingMock).toHaveBeenCalledWith(
     {
@@ -453,16 +694,17 @@ test('保存失败时保持 idle 并显示明确错误', async () => {
 });
 
 test('权限允许时只安排一条提醒并把取件号码写回外层状态', async () => {
-  requestFastingNotificationPermissionMock.mockResolvedValue(true);
+  requestCycleNotificationPermissionMock.mockResolvedValue(true);
   const renderer = await renderScreen();
 
   pressButton(renderer, '开始断食');
   await flushPromises();
 
-  expect(getRenderedText(renderer)).toContain('断食进行中');
-  expect(scheduleFastingCompletionNotificationMock).toHaveBeenCalledTimes(1);
-  expect(scheduleFastingCompletionNotificationMock).toHaveBeenCalledWith(
+  expect(getRenderedText(renderer)).toContain('断食已进行');
+  expect(scheduleCycleCompletionNotificationMock).toHaveBeenCalledTimes(1);
+  expect(scheduleCycleCompletionNotificationMock).toHaveBeenCalledWith(
     VALID_SESSION.plannedEndAt,
+    'fasting',
   );
   expect(saveCurrentFastingStateMock).toHaveBeenNthCalledWith(
     1,
@@ -476,7 +718,7 @@ test('权限允许时只安排一条提醒并把取件号码写回外层状态',
   expect(
     saveCurrentFastingStateMock.mock.invocationCallOrder[0],
   ).toBeLessThan(
-    scheduleFastingCompletionNotificationMock.mock.invocationCallOrder[0],
+    scheduleCycleCompletionNotificationMock.mock.invocationCallOrder[0],
   );
   expect(getRenderedText(renderer)).not.toContain('提醒未启用');
 
@@ -489,10 +731,10 @@ test('权限拒绝时会话仍进入 fasting，并显示提醒不可用', async 
   pressButton(renderer, '开始断食');
   await flushPromises();
 
-  expect(getRenderedText(renderer)).toContain('断食进行中');
+  expect(getRenderedText(renderer)).toContain('断食已进行');
   expect(getRenderedText(renderer)).toContain('提醒未启用');
   expect(saveCurrentFastingStateMock).toHaveBeenCalledTimes(1);
-  expect(scheduleFastingCompletionNotificationMock).not.toHaveBeenCalled();
+  expect(scheduleCycleCompletionNotificationMock).not.toHaveBeenCalled();
   expect(clearCurrentFastingStateMock).not.toHaveBeenCalled();
 
   ReactTestRenderer.act(() => renderer.unmount());
@@ -502,8 +744,8 @@ test('通知安排失败时不回滚已保存的会话', async () => {
   const consoleErrorSpy = jest
     .spyOn(console, 'error')
     .mockImplementation(() => undefined);
-  requestFastingNotificationPermissionMock.mockResolvedValue(true);
-  scheduleFastingCompletionNotificationMock.mockRejectedValue(
+  requestCycleNotificationPermissionMock.mockResolvedValue(true);
+  scheduleCycleCompletionNotificationMock.mockRejectedValue(
     new Error('schedule failed'),
   );
   const renderer = await renderScreen();
@@ -511,7 +753,7 @@ test('通知安排失败时不回滚已保存的会话', async () => {
   pressButton(renderer, '开始断食');
   await flushPromises();
 
-  expect(getRenderedText(renderer)).toContain('断食进行中');
+  expect(getRenderedText(renderer)).toContain('断食已进行');
   expect(getRenderedText(renderer)).toContain('提醒未启用');
   expect(saveCurrentFastingStateMock).toHaveBeenCalledTimes(1);
   expect(clearCurrentFastingStateMock).not.toHaveBeenCalled();
@@ -537,7 +779,7 @@ test('同步失败时不回滚手机已经保存的 fasting', async () => {
   pressButton(renderer, '开始断食');
   await flushPromises();
 
-  expect(getRenderedText(renderer)).toContain('断食进行中');
+  expect(getRenderedText(renderer)).toContain('断食已进行');
   expect(getRenderedText(renderer)).not.toContain('断食状态保存失败');
   expect(saveCurrentFastingStateMock).toHaveBeenCalledWith(VALID_SESSION);
   expect(clearCurrentFastingStateMock).not.toHaveBeenCalled();
@@ -553,7 +795,7 @@ test('取件号码写回失败时尝试撤销刚安排的提醒', async () => {
   const consoleErrorSpy = jest
     .spyOn(console, 'error')
     .mockImplementation(() => undefined);
-  requestFastingNotificationPermissionMock.mockResolvedValue(true);
+  requestCycleNotificationPermissionMock.mockResolvedValue(true);
   saveCurrentFastingStateMock
     .mockResolvedValueOnce()
     .mockRejectedValueOnce(new Error('second write failed'));
@@ -562,10 +804,10 @@ test('取件号码写回失败时尝试撤销刚安排的提醒', async () => {
   pressButton(renderer, '开始断食');
   await flushPromises();
 
-  expect(getRenderedText(renderer)).toContain('断食进行中');
+  expect(getRenderedText(renderer)).toContain('断食已进行');
   expect(getRenderedText(renderer)).toContain('提醒未启用');
   expect(saveCurrentFastingStateMock).toHaveBeenCalledTimes(2);
-  expect(cancelFastingCompletionNotificationMock).toHaveBeenCalledWith(
+  expect(cancelCycleCompletionNotificationMock).toHaveBeenCalledWith(
     'notification-1',
   );
   expect(clearCurrentFastingStateMock).not.toHaveBeenCalled();
@@ -577,28 +819,63 @@ test('取件号码写回失败时尝试撤销刚安排的提醒', async () => {
   ReactTestRenderer.act(() => renderer.unmount());
 });
 
-test('结束时先删除，删除成功后页面才进入 idle', async () => {
-  const clearIntervalSpy = jest.spyOn(globalThis, 'clearInterval');
-  readCurrentFastingStateMock.mockResolvedValue(restoredState());
-  const clearDeferred = createDeferred<void>();
-  clearCurrentFastingStateMock.mockReturnValue(clearDeferred.promise);
+test('结束断食时先保存 eating，再切换提醒并向 Wear v1 urgent 提交 idle', async () => {
+  requestCycleNotificationPermissionMock.mockResolvedValue(true);
+  readCurrentFastingStateMock.mockResolvedValue(
+    restoredState({
+      ...VALID_PERSISTED_STATE,
+      completionNotificationId: 'notification-fasting',
+    }),
+  );
+  const saveDeferred = createDeferred<void>();
+  saveCurrentFastingStateMock
+    .mockReturnValueOnce(saveDeferred.promise)
+    .mockResolvedValue();
   const renderer = await renderScreen();
 
   pressButton(renderer, '结束断食');
 
-  expect(clearCurrentFastingStateMock).toHaveBeenCalledTimes(1);
-  expect(getRenderedText(renderer)).toContain('断食进行中');
+  expect(saveCurrentFastingStateMock).toHaveBeenCalledWith(
+    VALID_EATING_SESSION,
+  );
+  expect(getRenderedText(renderer)).toContain('断食已进行');
   expect(
-    renderer.root.findByProps({accessibilityLabel: '正在结束…'}).props.disabled,
+    renderer.root.findByProps({
+      accessibilityLabel: '正在进入进食窗口…',
+    }).props.disabled,
   ).toBe(true);
+  expect(cancelCycleCompletionNotificationMock).not.toHaveBeenCalled();
 
   await ReactTestRenderer.act(async () => {
-    clearDeferred.resolve();
-    await clearDeferred.promise;
+    saveDeferred.resolve();
+    await saveDeferred.promise;
   });
+  await flushPromises();
 
-  expect(getRenderedText(renderer)).toContain('尚未开始');
-  expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
+  expect(getRenderedText(renderer)).toContain('进食窗口');
+  expect(getRenderedText(renderer)).toContain('08:00:00');
+  expect(cancelCycleCompletionNotificationMock).toHaveBeenCalledWith(
+    'notification-fasting',
+  );
+  expect(scheduleCycleCompletionNotificationMock).toHaveBeenCalledWith(
+    VALID_EATING_SESSION.plannedEndAt,
+    'eating',
+  );
+  expect(saveCurrentFastingStateMock).toHaveBeenNthCalledWith(
+    2,
+    VALID_EATING_SESSION,
+    'notification-1',
+  );
+  expect(
+    saveCurrentFastingStateMock.mock.invocationCallOrder[0],
+  ).toBeLessThan(
+    cancelCycleCompletionNotificationMock.mock.invocationCallOrder[0],
+  );
+  expect(
+    cancelCycleCompletionNotificationMock.mock.invocationCallOrder[0],
+  ).toBeLessThan(
+    scheduleCycleCompletionNotificationMock.mock.invocationCallOrder[0],
+  );
   expect(syncCurrentFastingMock).toHaveBeenLastCalledWith(
     {
       protocolVersion: 1,
@@ -611,60 +888,53 @@ test('结束时先删除，删除成功后页面才进入 idle', async () => {
   ReactTestRenderer.act(() => renderer.unmount());
 });
 
-test('结束时先保留取件号码，再清本地，最后取消对应提醒', async () => {
-  const stateWithNotification: PersistedFastingState = {
-    ...VALID_PERSISTED_STATE,
-    completionNotificationId: 'notification-1',
-  };
-  readCurrentFastingStateMock.mockResolvedValue(
-    restoredState(stateWithNotification),
-  );
-  const cancelDeferred = createDeferred<void>();
-  cancelFastingCompletionNotificationMock.mockReturnValue(
-    cancelDeferred.promise,
-  );
-  const renderer = await renderScreen();
-
-  pressButton(renderer, '结束断食');
-  await flushPromises();
-
-  expect(getRenderedText(renderer)).toContain('尚未开始');
-  expect(clearCurrentFastingStateMock).toHaveBeenCalledTimes(1);
-  expect(cancelFastingCompletionNotificationMock).toHaveBeenCalledWith(
-    'notification-1',
-  );
-  expect(
-    clearCurrentFastingStateMock.mock.invocationCallOrder[0],
-  ).toBeLessThan(
-    cancelFastingCompletionNotificationMock.mock.invocationCallOrder[0],
-  );
-
-  await ReactTestRenderer.act(async () => {
-    cancelDeferred.resolve();
-    await cancelDeferred.promise;
-  });
-  ReactTestRenderer.act(() => renderer.unmount());
-});
-
-test('取消提醒失败时仍保持 idle，并显示非阻塞提示', async () => {
-  jest.spyOn(console, 'error').mockImplementation(() => undefined);
+test('eating 保存失败时保持 fasting，不取消提醒或提交 idle', async () => {
   readCurrentFastingStateMock.mockResolvedValue(
     restoredState({
       ...VALID_PERSISTED_STATE,
-      completionNotificationId: 'notification-1',
+      completionNotificationId: 'notification-fasting',
     }),
   );
-  cancelFastingCompletionNotificationMock.mockRejectedValue(
+  saveCurrentFastingStateMock.mockRejectedValue(new Error('write failed'));
+  const renderer = await renderScreen();
+
+  pressButton(renderer, '结束断食');
+  await flushPromises();
+
+  expect(getRenderedText(renderer)).toContain('断食已进行');
+  expect(getRenderedText(renderer)).toContain(
+    '进食窗口保存失败，本次断食仍在继续，请重试。',
+  );
+  expect(cancelCycleCompletionNotificationMock).not.toHaveBeenCalled();
+  expect(scheduleCycleCompletionNotificationMock).not.toHaveBeenCalled();
+  expect(syncCurrentFastingMock).not.toHaveBeenCalledWith(
+    expect.objectContaining({status: 'idle'}),
+    true,
+  );
+
+  ReactTestRenderer.act(() => renderer.unmount());
+});
+
+test('切换 eating 时取消旧提醒失败不会回滚新状态', async () => {
+  jest.spyOn(console, 'error').mockImplementation(() => undefined);
+  requestCycleNotificationPermissionMock.mockResolvedValue(true);
+  cancelCycleCompletionNotificationMock.mockRejectedValue(
     new Error('cancel failed'),
+  );
+  readCurrentFastingStateMock.mockResolvedValue(
+    restoredState({
+      ...VALID_PERSISTED_STATE,
+      completionNotificationId: 'notification-fasting',
+    }),
   );
   const renderer = await renderScreen();
 
   pressButton(renderer, '结束断食');
   await flushPromises();
 
-  expect(getRenderedText(renderer)).toContain('尚未开始');
-  expect(getRenderedText(renderer)).toContain('旧提醒可能仍会出现');
-  expect(clearCurrentFastingStateMock).toHaveBeenCalledTimes(1);
+  expect(getRenderedText(renderer)).toContain('进食窗口');
+  expect(getRenderedText(renderer)).toContain('上一阶段提醒可能仍会出现');
+  expect(scheduleCycleCompletionNotificationMock).toHaveBeenCalledTimes(1);
   expect(syncCurrentFastingMock).toHaveBeenLastCalledWith(
     expect.objectContaining({status: 'idle'}),
     true,
@@ -673,34 +943,123 @@ test('取消提醒失败时仍保持 idle，并显示非阻塞提示', async () 
   ReactTestRenderer.act(() => renderer.unmount());
 });
 
-test('删除失败时保留 fasting 并显示明确错误', async () => {
-  const clearIntervalSpy = jest.spyOn(globalThis, 'clearInterval');
+test('eating 提醒或 Wear 同步失败都不回滚 eating', async () => {
+  jest.spyOn(console, 'error').mockImplementation(() => undefined);
+  requestCycleNotificationPermissionMock.mockResolvedValue(true);
+  scheduleCycleCompletionNotificationMock.mockRejectedValue(
+    new Error('schedule failed'),
+  );
+  syncCurrentFastingMock.mockRejectedValue(new Error('data layer failed'));
   readCurrentFastingStateMock.mockResolvedValue(restoredState());
-  clearCurrentFastingStateMock.mockRejectedValue(new Error('remove failed'));
   const renderer = await renderScreen();
 
   pressButton(renderer, '结束断食');
   await flushPromises();
 
-  expect(getRenderedText(renderer)).toContain('断食进行中');
-  expect(getRenderedText(renderer)).toContain(
-    '本地状态清除失败，本次断食仍在继续，请重试。',
+  expect(getRenderedText(renderer)).toContain('进食窗口');
+  expect(getRenderedText(renderer)).toContain('提醒未启用');
+  expect(saveCurrentFastingStateMock).toHaveBeenCalledWith(
+    VALID_EATING_SESSION,
   );
-  expect(clearIntervalSpy).not.toHaveBeenCalled();
-  expect(
-    syncCurrentFastingMock.mock.calls.some(
-      ([payload]) => payload.status === 'idle',
-    ),
-  ).toBe(false);
+  expect(clearCurrentFastingStateMock).not.toHaveBeenCalled();
 
   ReactTestRenderer.act(() => renderer.unmount());
 });
 
-test('快速重复点击开始和结束都只执行一次存储操作', async () => {
-  requestFastingNotificationPermissionMock.mockResolvedValue(true);
-  const saveDeferred = createDeferred<void>();
+test('结束 eating 时先清本地，成功后回 idle 并取消提醒', async () => {
+  readCurrentFastingStateMock.mockResolvedValue(
+    restoredState({
+      storageVersion: 2,
+      session: VALID_EATING_SESSION,
+      completionNotificationId: 'notification-eating',
+    }),
+  );
+  const clearDeferred = createDeferred<void>();
+  clearCurrentFastingStateMock.mockReturnValue(clearDeferred.promise);
+  const renderer = await renderScreen();
+  const restoreSyncCallCount = syncCurrentFastingMock.mock.calls.length;
+
+  pressButton(renderer, '结束进食窗口');
+
+  expect(clearCurrentFastingStateMock).toHaveBeenCalledTimes(1);
+  expect(getRenderedText(renderer)).toContain('进食窗口');
+  expect(
+    renderer.root.findByProps({
+      accessibilityLabel: '正在结束进食窗口…',
+    }).props.disabled,
+  ).toBe(true);
+  expect(cancelCycleCompletionNotificationMock).not.toHaveBeenCalled();
+
+  await ReactTestRenderer.act(async () => {
+    clearDeferred.resolve();
+    await clearDeferred.promise;
+  });
+  await flushPromises();
+
+  expect(getRenderedText(renderer)).toContain('尚未开始');
+  expect(cancelCycleCompletionNotificationMock).toHaveBeenCalledWith(
+    'notification-eating',
+  );
+  expect(
+    clearCurrentFastingStateMock.mock.invocationCallOrder[0],
+  ).toBeLessThan(
+    cancelCycleCompletionNotificationMock.mock.invocationCallOrder[0],
+  );
+  expect(syncCurrentFastingMock).toHaveBeenCalledTimes(restoreSyncCallCount);
+
+  ReactTestRenderer.act(() => renderer.unmount());
+});
+
+test('结束 eating 清除失败时保持 eating 且不取消提醒', async () => {
+  readCurrentFastingStateMock.mockResolvedValue(
+    restoredState({
+      storageVersion: 2,
+      session: VALID_EATING_SESSION,
+      completionNotificationId: 'notification-eating',
+    }),
+  );
+  clearCurrentFastingStateMock.mockRejectedValue(new Error('remove failed'));
+  const renderer = await renderScreen();
+
+  pressButton(renderer, '结束进食窗口');
+  await flushPromises();
+
+  expect(getRenderedText(renderer)).toContain('进食窗口');
+  expect(getRenderedText(renderer)).toContain(
+    '本地状态清除失败，进食窗口仍在继续，请重试。',
+  );
+  expect(cancelCycleCompletionNotificationMock).not.toHaveBeenCalled();
+
+  ReactTestRenderer.act(() => renderer.unmount());
+});
+
+test('结束 eating 后取消提醒失败仍保持 idle', async () => {
+  jest.spyOn(console, 'error').mockImplementation(() => undefined);
+  readCurrentFastingStateMock.mockResolvedValue(
+    restoredState({
+      storageVersion: 2,
+      session: VALID_EATING_SESSION,
+      completionNotificationId: 'notification-eating',
+    }),
+  );
+  cancelCycleCompletionNotificationMock.mockRejectedValue(
+    new Error('cancel failed'),
+  );
+  const renderer = await renderScreen();
+
+  pressButton(renderer, '结束进食窗口');
+  await flushPromises();
+
+  expect(getRenderedText(renderer)).toContain('尚未开始');
+  expect(getRenderedText(renderer)).toContain('上一阶段提醒可能仍会出现');
+
+  ReactTestRenderer.act(() => renderer.unmount());
+});
+
+test('快速重复点击在三个状态切换中都只执行一次主存储操作', async () => {
+  const firstSaveDeferred = createDeferred<void>();
   saveCurrentFastingStateMock
-    .mockReturnValueOnce(saveDeferred.promise)
+    .mockReturnValueOnce(firstSaveDeferred.promise)
     .mockResolvedValue();
   const renderer = await renderScreen();
   const startButton = renderer.root.findByProps({
@@ -714,30 +1073,45 @@ test('快速重复点击开始和结束都只执行一次存储操作', async ()
   expect(saveCurrentFastingStateMock).toHaveBeenCalledTimes(1);
 
   await ReactTestRenderer.act(async () => {
-    saveDeferred.resolve();
-    await saveDeferred.promise;
+    firstSaveDeferred.resolve();
+    await firstSaveDeferred.promise;
   });
   await flushPromises();
-  expect(scheduleFastingCompletionNotificationMock).toHaveBeenCalledTimes(1);
 
-  const clearDeferred = createDeferred<void>();
-  clearCurrentFastingStateMock.mockReturnValue(clearDeferred.promise);
-  const endButton = renderer.root.findByProps({
+  const eatingSaveDeferred = createDeferred<void>();
+  saveCurrentFastingStateMock.mockReturnValueOnce(eatingSaveDeferred.promise);
+  const endFastingButton = renderer.root.findByProps({
     accessibilityLabel: '结束断食',
   });
 
   ReactTestRenderer.act(() => {
-    endButton.props.onPress();
-    endButton.props.onPress();
+    endFastingButton.props.onPress();
+    endFastingButton.props.onPress();
+  });
+  expect(saveCurrentFastingStateMock).toHaveBeenCalledTimes(2);
+
+  await ReactTestRenderer.act(async () => {
+    eatingSaveDeferred.resolve();
+    await eatingSaveDeferred.promise;
+  });
+  await flushPromises();
+
+  const clearDeferred = createDeferred<void>();
+  clearCurrentFastingStateMock.mockReturnValue(clearDeferred.promise);
+  const endEatingButton = renderer.root.findByProps({
+    accessibilityLabel: '结束进食窗口',
+  });
+
+  ReactTestRenderer.act(() => {
+    endEatingButton.props.onPress();
+    endEatingButton.props.onPress();
   });
   expect(clearCurrentFastingStateMock).toHaveBeenCalledTimes(1);
-  expect(cancelFastingCompletionNotificationMock).not.toHaveBeenCalled();
 
   await ReactTestRenderer.act(async () => {
     clearDeferred.resolve();
     await clearDeferred.promise;
   });
-  expect(cancelFastingCompletionNotificationMock).toHaveBeenCalledTimes(1);
 
   ReactTestRenderer.act(() => renderer.unmount());
 });
@@ -746,9 +1120,9 @@ test('损坏数据明确提示且只在用户重置后清除', async () => {
   readCurrentFastingStateMock.mockResolvedValue({status: 'invalid'});
   const renderer = await renderScreen();
 
-  expect(getRenderedText(renderer)).toContain('上次断食状态无法恢复');
+  expect(getRenderedText(renderer)).toContain('上次周期状态无法恢复');
   expect(getRenderedText(renderer)).toContain('重置前不会覆盖或删除它');
-  expect(clearCurrentFastingStateMock).not.toHaveBeenCalled();
+  expect(resetCurrentCycleDataMock).not.toHaveBeenCalled();
   expect(
     renderer.root.findAllByProps({accessibilityLabel: '开始断食'}),
   ).toHaveLength(0);
@@ -756,7 +1130,7 @@ test('损坏数据明确提示且只在用户重置后清除', async () => {
   pressButton(renderer, '重置本地状态');
   await flushPromises();
 
-  expect(clearCurrentFastingStateMock).toHaveBeenCalledTimes(1);
+  expect(resetCurrentCycleDataMock).toHaveBeenCalledTimes(1);
   expect(
     renderer.root.findByProps({accessibilityLabel: '开始断食'}),
   ).toBeDefined();
@@ -766,13 +1140,13 @@ test('损坏数据明确提示且只在用户重置后清除', async () => {
 
 test('损坏数据重置失败时继续保留错误状态', async () => {
   readCurrentFastingStateMock.mockResolvedValue({status: 'invalid'});
-  clearCurrentFastingStateMock.mockRejectedValue(new Error('remove failed'));
+  resetCurrentCycleDataMock.mockRejectedValue(new Error('remove failed'));
   const renderer = await renderScreen();
 
   pressButton(renderer, '重置本地状态');
   await flushPromises();
 
-  expect(getRenderedText(renderer)).toContain('上次断食状态无法恢复');
+  expect(getRenderedText(renderer)).toContain('上次周期状态无法恢复');
   expect(getRenderedText(renderer)).toContain(
     '本地状态清除失败，原记录仍保留在手机中，请重试。',
   );
@@ -789,7 +1163,7 @@ test('底层读取失败时提供重试，不会假装进入 idle', async () => 
     .mockResolvedValueOnce({status: 'empty'});
   const renderer = await renderScreen();
 
-  expect(getRenderedText(renderer)).toContain('暂时无法读取断食状态');
+  expect(getRenderedText(renderer)).toContain('暂时无法读取周期状态');
   expect(
     renderer.root.findAllByProps({accessibilityLabel: '开始断食'}),
   ).toHaveLength(0);
@@ -812,13 +1186,13 @@ test('interval 每秒只刷新时间，不会再次持久化', async () => {
   await flushPromises();
   expect(saveCurrentFastingStateMock).toHaveBeenCalledTimes(1);
   const permissionCallCount =
-    requestFastingNotificationPermissionMock.mock.calls.length;
+    requestCycleNotificationPermissionMock.mock.calls.length;
   const scheduleCallCount =
-    scheduleFastingCompletionNotificationMock.mock.calls.length;
+    scheduleCycleCompletionNotificationMock.mock.calls.length;
   const queryCallCount =
-    isFastingCompletionNotificationScheduledMock.mock.calls.length;
+    isCycleCompletionNotificationScheduledMock.mock.calls.length;
   const cancelCallCount =
-    cancelFastingCompletionNotificationMock.mock.calls.length;
+    cancelCycleCompletionNotificationMock.mock.calls.length;
   const syncCallCount = syncCurrentFastingMock.mock.calls.length;
 
   ReactTestRenderer.act(() => {
@@ -828,18 +1202,49 @@ test('interval 每秒只刷新时间，不会再次持久化', async () => {
   expect(getRenderedText(renderer)).toContain('00:00:05');
   expect(saveCurrentFastingStateMock).toHaveBeenCalledTimes(1);
   expect(clearCurrentFastingStateMock).not.toHaveBeenCalled();
-  expect(requestFastingNotificationPermissionMock).toHaveBeenCalledTimes(
+  expect(requestCycleNotificationPermissionMock).toHaveBeenCalledTimes(
     permissionCallCount,
   );
-  expect(scheduleFastingCompletionNotificationMock).toHaveBeenCalledTimes(
+  expect(scheduleCycleCompletionNotificationMock).toHaveBeenCalledTimes(
     scheduleCallCount,
   );
-  expect(isFastingCompletionNotificationScheduledMock).toHaveBeenCalledTimes(
+  expect(isCycleCompletionNotificationScheduledMock).toHaveBeenCalledTimes(
     queryCallCount,
   );
-  expect(cancelFastingCompletionNotificationMock).toHaveBeenCalledTimes(
+  expect(cancelCycleCompletionNotificationMock).toHaveBeenCalledTimes(
     cancelCallCount,
   );
+  expect(syncCurrentFastingMock).toHaveBeenCalledTimes(syncCallCount);
+
+  ReactTestRenderer.act(() => renderer.unmount());
+});
+
+test('eating 每秒刷新也不会写存储、通知或 DataItem', async () => {
+  readCurrentFastingStateMock.mockResolvedValue(
+    restoredState({
+      storageVersion: 2,
+      session: VALID_EATING_SESSION,
+      completionNotificationId: 'notification-eating',
+    }),
+  );
+  const renderer = await renderScreen();
+  const saveCallCount = saveCurrentFastingStateMock.mock.calls.length;
+  const queryCallCount =
+    isCycleCompletionNotificationScheduledMock.mock.calls.length;
+  const syncCallCount = syncCurrentFastingMock.mock.calls.length;
+
+  ReactTestRenderer.act(() => {
+    jest.advanceTimersByTime(5000);
+  });
+
+  expect(getRenderedText(renderer)).toContain('07:59:55');
+  expect(saveCurrentFastingStateMock).toHaveBeenCalledTimes(saveCallCount);
+  expect(clearCurrentFastingStateMock).not.toHaveBeenCalled();
+  expect(isCycleCompletionNotificationScheduledMock).toHaveBeenCalledTimes(
+    queryCallCount,
+  );
+  expect(scheduleCycleCompletionNotificationMock).not.toHaveBeenCalled();
+  expect(cancelCycleCompletionNotificationMock).not.toHaveBeenCalled();
   expect(syncCurrentFastingMock).toHaveBeenCalledTimes(syncCallCount);
 
   ReactTestRenderer.act(() => renderer.unmount());
@@ -855,35 +1260,71 @@ test('重新打开后按原时间戳和新的当前时间继续计算', async ()
 
   jest.setSystemTime(FIXED_NOW + 5 * 60 * 1000);
   readCurrentFastingStateMock.mockResolvedValue(
-    restoredState({storageVersion: 1, session: savedSession}),
+    restoredState({storageVersion: 2, session: savedSession}),
   );
   const reopenedRenderer = await renderScreen();
 
   expect(savedSession.startAt).toBe(FIXED_NOW);
   expect(savedSession.plannedEndAt).toBe(FIXED_NOW + DEFAULT_FASTING_MS);
   expect(getRenderedText(reopenedRenderer)).toContain('00:05:00');
-  expect(getRenderedText(reopenedRenderer)).toContain('还剩 15:55:00');
+  expect(getRenderedText(reopenedRenderer)).toContain('15:55:00');
 
   ReactTestRenderer.act(() => reopenedRenderer.unmount());
 });
 
 test('到达目标后保持会话、剩余不为负数，直到用户结束', async () => {
   const clearIntervalSpy = jest.spyOn(globalThis, 'clearInterval');
-  readCurrentFastingStateMock.mockResolvedValue(restoredState());
+  const shortFastingSession: FastingSession = {
+    id: 'fasting-short',
+    status: 'fasting',
+    startAt: FIXED_NOW,
+    plannedEndAt: FIXED_NOW + 1000,
+  };
+  readCurrentFastingStateMock.mockResolvedValue(
+    restoredState({storageVersion: 2, session: shortFastingSession}),
+  );
   const renderer = await renderScreen();
 
-  jest.setSystemTime(FIXED_NOW + DEFAULT_FASTING_MS - 1000);
   ReactTestRenderer.act(() => {
     jest.advanceTimersByTime(1000);
   });
 
-  expect(getRenderedText(renderer)).toContain('目标已达成');
+  expect(getRenderedText(renderer)).toContain('断食目标已达成');
   expect(getRenderedText(renderer)).toContain('已完成 100%');
-  expect(getRenderedText(renderer)).not.toContain('还剩 -');
+  expect(getRenderedText(renderer)).not.toContain('-00:');
+  expect(saveCurrentFastingStateMock).not.toHaveBeenCalled();
+  expect(clearCurrentFastingStateMock).not.toHaveBeenCalled();
 
-  pressButton(renderer, '结束本次断食');
+  pressButton(renderer, '结束断食');
   await flushPromises();
+  expect(getRenderedText(renderer)).toContain('进食窗口');
   expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
+
+  ReactTestRenderer.act(() => renderer.unmount());
+});
+
+test('进食窗口用短时长到零后不自动回 idle', async () => {
+  const shortEatingSession: ActiveCycleSession = {
+    id: 'eating-short',
+    status: 'eating',
+    startAt: FIXED_NOW,
+    plannedEndAt: FIXED_NOW + 1000,
+  };
+  readCurrentFastingStateMock.mockResolvedValue(
+    restoredState({storageVersion: 2, session: shortEatingSession}),
+  );
+  const renderer = await renderScreen();
+
+  ReactTestRenderer.act(() => {
+    jest.advanceTimersByTime(1000);
+  });
+
+  expect(getRenderedText(renderer)).toContain('进食窗口已结束');
+  expect(getRenderedText(renderer)).toContain('00:00:00');
+  expect(clearCurrentFastingStateMock).not.toHaveBeenCalled();
+  expect(
+    renderer.root.findByProps({accessibilityLabel: '结束进食窗口'}),
+  ).toBeDefined();
 
   ReactTestRenderer.act(() => renderer.unmount());
 });
@@ -908,7 +1349,7 @@ test('回到前台时立即按新的系统时间校正显示', async () => {
   });
 
   expect(getRenderedText(renderer)).toContain('00:05:00');
-  expect(getRenderedText(renderer)).toContain('还剩 15:55:00');
+  expect(getRenderedText(renderer)).toContain('15:55:00');
 
   ReactTestRenderer.act(() => renderer.unmount());
   expect(removeAppStateListener).toHaveBeenCalledTimes(1);
