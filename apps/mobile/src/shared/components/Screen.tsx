@@ -62,6 +62,7 @@ const styles = StyleSheet.create({
   },
   title: {
     color: theme.colors.text,
+    fontFamily: theme.fonts.medium,
     fontSize: theme.spacing.xl,
     fontWeight: '600',
   },

@@ -41,7 +41,15 @@
       ],
       "./plugins/with-shared-debug-keystore",
       "expo-notifications",
-      "expo-splash-screen"
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#1ACE87",
+          "image": "./assets/branding/splash-icon.png",
+          "imageWidth": 220,
+          "resizeMode": "contain"
+        }
+      ]
     ]
   }
 }

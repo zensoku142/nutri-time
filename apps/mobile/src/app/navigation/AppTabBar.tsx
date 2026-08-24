@@ -34,6 +34,7 @@ export function AppTabBar(props: BottomTabBarProps) {
       {...props}
       colors={tabBarColors}
       icons={tabIcons}
+      labelFontFamily={theme.fonts.medium}
     />
   );
 }

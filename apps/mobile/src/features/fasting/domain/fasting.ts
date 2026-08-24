@@ -33,10 +33,17 @@ export const DEFAULT_CYCLE_PLAN: CyclePlan = {
   eatingMinutes: DEFAULT_EATING_MINUTES,
 };
 
+const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 const MILLISECONDS_PER_MINUTE = 60 * 1000;
 const MILLISECONDS_PER_SECOND = 1000;
 const SECONDS_PER_MINUTE = 60;
 const SECONDS_PER_HOUR = 60 * SECONDS_PER_MINUTE;
+const RELATIVE_DATE_LABELS: Readonly<Record<number, string>> = {
+  [-2]: '前天',
+  [-1]: '昨天',
+  0: '今日',
+  1: '明天',
+};
 
 // ---------- 会话创建 ----------
 export function createFastingSession(
@@ -143,13 +150,33 @@ export function formatRemainingMs(remainingMs: number): string {
   return formatWholeSeconds(totalSeconds);
 }
 
-export function formatClockTime(timestamp: number): string {
-  // Date（把传入时间戳换成本地年月日和时分的工具）这里只转换参数，不会读取当前系统时间。
+export function formatClockTime(
+  timestamp: number,
+  referenceTimestamp: number = Date.now(),
+): string {
+  // Date（把时间戳换成本地年月日和时分的工具）用 referenceTimestamp 判断是不是同一个自然日。
+  // 首页传入自己正在显示的 now，跨过午夜时“今日”会自动变成“昨天”，不会误导用户。
   const date = new Date(timestamp);
+  const referenceDate = new Date(referenceTimestamp);
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   const hours = String(date.getHours()).padStart(2, '0');
   const minutes = String(date.getMinutes()).padStart(2, '0');
+  // 先把本地年月日放进 UTC（只借它做天数编号），夏令时出现 23 或 25 小时时也不会把相邻日期算错。
+  const calendarDayNumber = Date.UTC(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+  );
+  const referenceDayNumber = Date.UTC(
+    referenceDate.getFullYear(),
+    referenceDate.getMonth(),
+    referenceDate.getDate(),
+  );
+  const dayDifference = Math.round(
+    (calendarDayNumber - referenceDayNumber) / MILLISECONDS_PER_DAY,
+  );
+  const dateLabel = RELATIVE_DATE_LABELS[dayDifference] ?? `${month}/${day}`;
 
-  return `${month}/${day} ${hours}:${minutes}`;
+  return `${dateLabel} ${hours}:${minutes}`;
 }

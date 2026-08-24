@@ -7,6 +7,7 @@ import {
   createFastingSession,
   DEFAULT_EATING_MINUTES,
   DEFAULT_FASTING_MINUTES,
+  formatClockTime,
   formatElapsedMs,
   formatRemainingMs,
   getElapsedMs,
@@ -128,6 +129,26 @@ test('时间显示正确跨过秒、分钟和小时边界', () => {
   expect(
     formatElapsedMs(25 * ONE_HOUR_MS + 2 * ONE_MINUTE_MS + 3 * ONE_SECOND_MS),
   ).toBe('25:02:03');
+});
+
+test('首页时间优先显示前天、昨天、今日和明天', () => {
+  const reference = new Date(2026, 7, 24, 12, 0, 0).getTime();
+
+  expect(
+    formatClockTime(new Date(2026, 7, 22, 9, 5, 0).getTime(), reference),
+  ).toBe('前天 09:05');
+  expect(
+    formatClockTime(new Date(2026, 7, 23, 9, 5, 0).getTime(), reference),
+  ).toBe('昨天 09:05');
+  expect(
+    formatClockTime(new Date(2026, 7, 24, 9, 5, 0).getTime(), reference),
+  ).toBe('今日 09:05');
+  expect(
+    formatClockTime(new Date(2026, 7, 25, 1, 30, 0).getTime(), reference),
+  ).toBe('明天 01:30');
+  expect(
+    formatClockTime(new Date(2026, 7, 26, 1, 30, 0).getTime(), reference),
+  ).toBe('08/26 01:30');
 });
 
 test('倒计时不足一秒时不会提前显示为零', () => {

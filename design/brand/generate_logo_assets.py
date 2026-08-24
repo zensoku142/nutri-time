@@ -150,6 +150,31 @@ def create_wordmark(mark: Image.Image, text_color: tuple[int, int, int, int]) ->
     return canvas
 
 
+def create_splash_lockup(mark: Image.Image) -> Image.Image:
+    canvas = Image.new("RGBA", (MASTER_SIZE, MASTER_SIZE), TRANSPARENT)
+    mark_size = 420
+    canvas.alpha_composite(
+        mark.resize((mark_size, mark_size), Image.Resampling.LANCZOS),
+        ((canvas.width - mark_size) // 2, 170),
+    )
+
+    font_path = REPOSITORY_ROOT / "apps" / "mobile" / "assets" / "fonts" / "Quicksand-Bold.ttf"
+    font = ImageFont.truetype(str(font_path), 140)
+    draw = ImageDraw.Draw(canvas)
+    text = "NutriTime"
+    text_box = draw.textbbox((0, 0), text, font=font)
+    text_width = text_box[2] - text_box[0]
+
+    # Android 会把启动图限制在屏幕中央；竖向排列能让标志和名称都保持清楚，不会把横向字标缩得过小。
+    draw.text(
+        ((canvas.width - text_width) // 2 - text_box[0], 680 - text_box[1]),
+        text,
+        font=font,
+        fill=WHITE,
+    )
+    return canvas
+
+
 def save_wear_webp(image: Image.Image, path: Path, size: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     resized = image.resize((size, size), Image.Resampling.LANCZOS)
@@ -192,7 +217,7 @@ def main() -> None:
     save_png(square_icon, mobile_assets / "app-icon.png")
     save_png(color_mark, mobile_assets / "adaptive-icon-foreground.png")
     save_png(monochrome_mark, mobile_assets / "adaptive-icon-monochrome.png")
-    save_png(color_mark, mobile_assets / "splash-icon.png")
+    save_png(create_splash_lockup(color_mark), mobile_assets / "splash-icon.png")
 
     wear_res = REPOSITORY_ROOT / "apps" / "wear" / "app" / "src" / "main" / "res"
     save_png(color_mark, wear_res / "drawable-nodpi" / "nutritime_logo_foreground.png", 432)

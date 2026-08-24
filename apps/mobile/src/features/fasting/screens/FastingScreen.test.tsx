@@ -270,7 +270,7 @@ test('空闲时可从底部弹层把默认 16:8 修改为 14:10', async () => {
 
   pressButton(renderer, '减少断食 1 小时');
   pressButton(renderer, '减少断食 1 小时');
-  expect(getRenderedText(renderer)).toContain('"14",":","10"');
+  expect(getRenderedText(renderer)).toContain('14:10');
 
   pressButton(renderer, '确认修改');
   await flushPromises();
@@ -387,6 +387,49 @@ test('开始时间晚于当前时间时保持编辑弹层且不写入', async ()
   ReactTestRenderer.act(() => renderer.unmount());
 });
 
+test('小时滚轮跨过 23 和 00 时不改变日期', async () => {
+  readCurrentFastingStateMock.mockResolvedValue(restoredState());
+  const renderer = await renderScreen();
+
+  pressButton(renderer, '修改断食开始时间');
+
+  // 当前是 20 点，连续向后四格会回到同一天 00 点；不能偷偷跳到第二天。
+  for (let index = 0; index < 4; index += 1) {
+    pressButton(renderer, '选择后一小时');
+  }
+
+  pressButton(renderer, '确认修改');
+  await flushPromises();
+
+  expect(saveCurrentFastingStateMock).toHaveBeenCalledWith(
+    expect.objectContaining({
+      startAt: new Date(2026, 7, 23, 0, 0, 0).getTime(),
+    }),
+  );
+
+  ReactTestRenderer.act(() => renderer.unmount());
+});
+
+test('分钟滚轮跨过 00 和 59 时不改变小时', async () => {
+  readCurrentFastingStateMock.mockResolvedValue(restoredState());
+  const renderer = await renderScreen();
+
+  pressButton(renderer, '修改断食开始时间');
+  pressButton(renderer, '选择前一小时');
+  pressButton(renderer, '选择前一分钟');
+  pressButton(renderer, '确认修改');
+  await flushPromises();
+
+  // 20:00 先选到 19:00，再把分钟从 00 向前滚到 59，结果必须是 19:59 而不是 18:59。
+  expect(saveCurrentFastingStateMock).toHaveBeenCalledWith(
+    expect.objectContaining({
+      startAt: new Date(2026, 7, 23, 19, 59, 0).getTime(),
+    }),
+  );
+
+  ReactTestRenderer.act(() => renderer.unmount());
+});
+
 test('自定义计划或开始时间保存失败时保留原值和旧提醒', async () => {
   readCurrentFastingStateMock.mockResolvedValue(
     restoredState({
@@ -429,8 +472,8 @@ test('合法数据恢复为 fasting 并保留原开始和结束时间', async ()
   const renderer = await renderScreen();
 
   expect(getRenderedText(renderer)).toContain('断食已进行');
-  expect(getRenderedText(renderer)).toContain('08/23 20:00');
-  expect(getRenderedText(renderer)).toContain('08/24 12:00');
+  expect(getRenderedText(renderer)).toContain('今日 20:00');
+  expect(getRenderedText(renderer)).toContain('明天 12:00');
   expect(getRenderedText(renderer)).toContain('16:00:00');
   expect(setIntervalSpy).toHaveBeenCalledTimes(1);
   expect(syncCurrentFastingMock).toHaveBeenCalledWith(
@@ -458,7 +501,7 @@ test('合法 eating 数据恢复进食窗口，并向 Wear v1 普通提交 idle'
 
   expect(getRenderedText(renderer)).toContain('进食窗口');
   expect(getRenderedText(renderer)).toContain('08:00:00');
-  expect(getRenderedText(renderer)).toContain('08/24 04:00');
+  expect(getRenderedText(renderer)).toContain('明天 04:00');
   expect(syncCurrentFastingMock).toHaveBeenCalledWith(
     {
       protocolVersion: 1,

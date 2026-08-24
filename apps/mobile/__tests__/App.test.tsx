@@ -55,5 +55,9 @@ test('可以完成本地恢复并渲染禁食首页', async () => {
   expect(renderedTree).toContain('开始断食');
 
   // 禁食页读取全局主题背景；检查真实渲染结果可防止页面与悬浮导航使用不同底色。
-  expect(renderedTree).toContain('#F4F4F4');
+  expect(renderedTree).toContain('#E7F8F2');
+
+  // 主按钮和重点数字必须跟随参考应用的青绿按钮、Roboto 中等字重，不能退回旧灰按钮和装饰数字字体。
+  expect(renderedTree).toContain('#61D1A9');
+  expect(renderedTree).toContain('sans-serif-medium');
 });

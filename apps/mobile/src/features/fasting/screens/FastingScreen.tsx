@@ -361,13 +361,15 @@ export function FastingScreen() {
   }, [restoreCurrentSession]);
 
   useEffect(() => {
-    if (session === null) {
+    if (session === null || timeEditor !== null) {
       return;
     }
 
     // interval（每隔一秒提醒一次的系统闹钟）只更新 now，让页面按两个时间戳重新计算；它不是计时真相。
     // 即使应用在后台暂停了这些提醒，回到前台后读取新系统时间也能一次校正，而不会少算后台经过的时间。
     const refreshNow = () => setNow(Date.now());
+    // 编辑弹层关闭后先立刻校正一次；弹层打开期间暂停底层圆环重画，滚轮手势才不会被每秒刷新打断。
+    refreshNow();
     const intervalId = setInterval(refreshNow, 1000);
     // AppState（应用当前在前台还是后台的状态）变回 active 时会立刻刷新，不必等下一秒的 interval。
     const appStateSubscription = AppState.addEventListener(
@@ -384,7 +386,7 @@ export function FastingScreen() {
       clearInterval(intervalId);
       appStateSubscription.remove();
     };
-  }, [session]);
+  }, [session, timeEditor]);
 
   // useWindowDimensions（系统递来的当前窗口尺寸）会在旋转或分屏时自动更新。
   // 宽和高都使用同一个 ringSize，圆环在不同手机上才不会再次被拉成椭圆。
@@ -641,9 +643,13 @@ export function FastingScreen() {
       if (unit === 'day') {
         date.setDate(date.getDate() + amount);
       } else if (unit === 'hour') {
-        date.setHours(date.getHours() + amount);
+        // 小时滚轮独立循环：23 后面是 00，00 前面是 23，但日期保持不变。
+        const nextHour = ((date.getHours() + amount) % 24 + 24) % 24;
+        date.setHours(nextHour);
       } else {
-        date.setMinutes(date.getMinutes() + amount);
+        // 分钟滚轮同样独立循环，跨过 59/00 时不能偷偷改变用户已经选好的小时。
+        const nextMinute = ((date.getMinutes() + amount) % 60 + 60) % 60;
+        date.setMinutes(nextMinute);
       }
 
       return date.getTime();
@@ -1026,7 +1032,7 @@ export function FastingScreen() {
                 style={styles.summaryValue}>
                 {session === null
                   ? '尚未开始'
-                  : formatClockTime(session.startAt)}
+                  : formatClockTime(session.startAt, now)}
               </Text>
             </View>
             <View style={styles.summaryItem}>
@@ -1039,7 +1045,7 @@ export function FastingScreen() {
                 style={styles.summaryValue}>
                 {session === null
                   ? '开始后计算'
-                  : formatClockTime(session.plannedEndAt)}
+                  : formatClockTime(session.plannedEndAt, now)}
               </Text>
             </View>
           </View>
@@ -1070,22 +1076,17 @@ export function FastingScreen() {
         </View>
       </ScrollView>
       <CyclePlanEditorModal
-        canDecreaseFasting={draftFastingHours > MIN_FASTING_HOURS}
-        canIncreaseFasting={draftFastingHours < MAX_FASTING_HOURS}
-        eatingHours={24 - draftFastingHours}
         error={editorError}
         fastingHours={draftFastingHours}
         isSaving={isEditorSaving}
         onCancel={closeTimeEditor}
         onConfirm={confirmPlanChange}
-        onDecreaseFasting={() =>
+        onShiftFastingHours={amount =>
           setDraftFastingHours(current =>
-            Math.max(MIN_FASTING_HOURS, current - 1),
-          )
-        }
-        onIncreaseFasting={() =>
-          setDraftFastingHours(current =>
-            Math.min(MAX_FASTING_HOURS, current + 1),
+            Math.min(
+              MAX_FASTING_HOURS,
+              Math.max(MIN_FASTING_HOURS, current + amount),
+            ),
           )
         }
         visible={timeEditor === 'plan'}
@@ -1127,6 +1128,7 @@ const styles = StyleSheet.create({
   },
   brand: {
     color: theme.colors.text,
+    fontFamily: theme.fonts.medium,
     fontSize: 20,
     fontWeight: '700',
   },
@@ -1145,6 +1147,7 @@ const styles = StyleSheet.create({
   },
   recoveryTitle: {
     color: theme.colors.text,
+    fontFamily: theme.fonts.medium,
     fontSize: 22,
     fontWeight: '700',
     textAlign: 'center',
@@ -1152,6 +1155,7 @@ const styles = StyleSheet.create({
   recoveryDetail: {
     maxWidth: 320,
     color: theme.colors.textSecondary,
+    fontFamily: theme.fonts.body,
     fontSize: 15,
     lineHeight: 22,
     textAlign: 'center',
@@ -1191,11 +1195,13 @@ const styles = StyleSheet.create({
   },
   statusTitle: {
     color: theme.colors.navigationActive,
+    fontFamily: theme.fonts.medium,
     fontSize: 21,
     fontWeight: '700',
   },
   statusDetail: {
     color: theme.colors.textSecondary,
+    fontFamily: theme.fonts.body,
     fontSize: 16,
   },
   durationTime: {
@@ -1208,6 +1214,7 @@ const styles = StyleSheet.create({
   },
   statusHint: {
     color: theme.colors.textSecondary,
+    fontFamily: theme.fonts.body,
     fontSize: 14,
     textAlign: 'center',
   },
@@ -1234,15 +1241,18 @@ const styles = StyleSheet.create({
   },
   summaryLabel: {
     color: theme.colors.textSecondary,
+    fontFamily: theme.fonts.body,
     fontSize: 14,
   },
   editTimeText: {
     color: theme.colors.fastingActive,
+    fontFamily: theme.fonts.medium,
     fontSize: 13,
     fontWeight: '700',
   },
   summaryValue: {
     color: theme.colors.text,
+    fontFamily: theme.fonts.medium,
     fontSize: 18,
     fontWeight: '600',
     textAlign: 'center',
@@ -1252,8 +1262,8 @@ const styles = StyleSheet.create({
     minHeight: 58,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 999,
-    backgroundColor: theme.colors.border,
+    borderRadius: theme.radius.button,
+    backgroundColor: theme.colors.primary,
     paddingHorizontal: theme.spacing.xl,
   },
   primaryButtonPressed: {
@@ -1263,13 +1273,15 @@ const styles = StyleSheet.create({
     opacity: 0.55,
   },
   primaryButtonText: {
-    color: theme.colors.text,
+    color: theme.colors.primaryButtonText,
+    fontFamily: theme.fonts.medium,
     fontSize: 18,
     fontWeight: '700',
   },
   errorText: {
     maxWidth: 330,
     color: theme.colors.textSecondary,
+    fontFamily: theme.fonts.body,
     fontSize: 14,
     lineHeight: 20,
     textAlign: 'center',

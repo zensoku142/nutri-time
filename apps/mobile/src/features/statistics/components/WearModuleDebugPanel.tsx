@@ -89,12 +89,13 @@ const styles = StyleSheet.create({
   },
   description: {
     color: theme.colors.textSecondary,
+    fontFamily: theme.fonts.body,
     textAlign: 'center',
   },
   button: {
     alignItems: 'center',
     paddingVertical: theme.spacing.md,
-    borderRadius: theme.radius.md,
+    borderRadius: theme.radius.button,
     backgroundColor: theme.colors.primary,
   },
   buttonPressed: {
@@ -104,16 +105,19 @@ const styles = StyleSheet.create({
     opacity: 0.55,
   },
   buttonText: {
-    color: theme.colors.surface,
+    color: theme.colors.primaryButtonText,
+    fontFamily: theme.fonts.medium,
     fontWeight: '600',
   },
   success: {
     color: theme.colors.primary,
+    fontFamily: theme.fonts.medium,
     textAlign: 'center',
     fontWeight: '600',
   },
   error: {
     color: theme.colors.danger,
+    fontFamily: theme.fonts.body,
     textAlign: 'center',
   },
 });

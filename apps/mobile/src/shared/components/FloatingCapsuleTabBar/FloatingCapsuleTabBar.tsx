@@ -36,6 +36,8 @@ export type FloatingCapsuleTabBarProps = BottomTabBarProps & {
   icons: Readonly<Record<string, ImageSourcePropType>>;
   colors: FloatingCapsuleTabBarColors;
   capsuleWidth?: DimensionValue;
+  // 字体由业务应用传入，通用导航不绑定某个品牌字库，其他项目仍可保留自己的外观。
+  labelFontFamily?: string;
 };
 
 // ---------- 尺寸 ----------
@@ -130,6 +132,7 @@ export function FloatingCapsuleTabBar({
   icons,
   colors,
   capsuleWidth = '70%',
+  labelFontFamily,
 }: FloatingCapsuleTabBarProps) {
   // React Navigation 会提供当前手机的安全区；bottomInset 是底部系统手势条占用的高度。
   const bottomInset = insets.bottom;
@@ -579,7 +582,11 @@ export function FloatingCapsuleTabBar({
                         {tintColor: foregroundColor},
                       ]}
                     />
-                    <Text style={[styles.label, {color: foregroundColor}]}>
+                    <Text
+                      style={[
+                        styles.label,
+                        {color: foregroundColor, fontFamily: labelFontFamily},
+                      ]}>
                       {label}
                     </Text>
                   </View>
@@ -629,7 +636,7 @@ const styles = StyleSheet.create({
     height: TAB_BAR_HEIGHT,
     flexDirection: 'row',
     padding: SPACING_XS,
-    // 胶囊使用全局纯白透明底色；后方遮罩使用页面同色连续渐变，不再有分层接缝。
+    // 胶囊使用全局纯白底色；后方遮罩使用页面同色连续渐变，不再有分层接缝。
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: RADIUS_LG + SPACING_SM,
     shadowOffset: {width: 0, height: SPACING_XS},
