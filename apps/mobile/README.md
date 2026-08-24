@@ -1,6 +1,6 @@
 # NutriTime Mobile
 
-这里是 NutriTime 的 Android 手机工程。第一阶段技术 MVP 先完成 16 小时断食计时闭环，8 小时进食窗口属于下一正式里程碑。
+这里是 NutriTime 的 Android 手机工程。当前已完成 Android 手机端 16 小时断食技术 MVP 验收；8 小时进食窗口属于下一正式里程碑，因此当前不是完整 16:8。
 
 当前工程从 MochiLedger 的 React Native 0.86 导航基础迁移而来，并已接入 Expo SDK 57 Development Build。目前包含：
 
@@ -52,5 +52,6 @@ pnpm test -- --runInBand
 - 目标时间提醒不申请精确闹钟权限，因此可能受省电策略影响而延后，不承诺精确到秒。
 - 最近任务划掉、系统回收、设备重启和 force stop 的区别与阶段 4 实测状态见 `../../docs/manual-test-checklist.md`。
 - Wear OS 不自行安排同类提醒；手机正式发送已接入，Wear 接收、协议错误处理和真实联调仍未完成。
+- 本次只完成阶段 7 的手机端技术 MVP 验收；原计划中的完整阶段 7 仍待 Wear 正式接收、last good state、非法协议处理和真实联调完成。
 - Android applicationId 为 `com.zensoku.nutritime`；手机和手表的同类构建还必须使用匹配签名。
 - 当前 mobile versionCode 从 `1000001` 起步。
