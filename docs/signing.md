@@ -15,9 +15,18 @@
 
 ## Release 签名
 
-release 对 release 必须使用同一张正式证书和同一个 key alias（证书中的密钥名称）。正式签名尚未配置；开始 Release 或 Data Layer Release 联调前，应为两端接入同一套私有凭据，并再次核对 APK/AAB 的实际证书。
+release 对 release 必须使用同一张正式证书和同一个 key alias（证书中的密钥名称）。手机端已经通过 `apps/mobile/plugins/with-release-signing.js` 接好环境变量入口；正式密钥仍需在仓库外生成，并作为 GitHub Actions Secrets 注入。完整准备和发布步骤见 `docs/mobile-release.md`。
 
-Expo 生成模板可能让本地 release 临时引用 Debug 证书，这只能用于早期本机构建，不代表正式签名已经完成，也不得用于发布。Release keystore、密码、令牌、凭据 JSON、私有地址和生产数据不得提交 Git；只允许通过本机环境变量、被忽略的本地配置或受控构建平台注入。
+手机 Release 任务缺少任意正式签名环境变量时会主动停止，不再退回 Debug 证书。Release keystore、密码、令牌、凭据 JSON、私有地址和生产数据不得提交 Git；只允许通过本机环境变量、被忽略的本地配置或受控构建平台注入。
+
+2026-08-25 已建立手机正式签名基线：
+
+- key alias：`nutritime`；
+- 算法：RSA 4096；
+- SHA-256：`BF:CD:62:55:C5:15:C9:B6:28:DA:62:95:8B:4C:9B:4C:EF:A4:C2:2B:BD:2F:63:6C:06:15:BF:56:B7:E1:F8:51`；
+- 私钥只保存在仓库外的加密备份和 GitHub Actions Secrets 中。
+
+Android 开发者登记、GitHub Release 和用户手机上的正式 APK 都必须保持这条指纹一致。以后新增 Wear Release 签名时也要使用同一证书，否则正式版手机和手表无法作为同一应用通信。
 
 ## 检查两端 APK 证书指纹
 

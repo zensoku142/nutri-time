@@ -40,6 +40,11 @@ jest.mock('../modules/wear-data-layer', () => ({
   ping: jest.fn(),
 }));
 
+// 完整入口测试不访问 GitHub；更新规则和 Android 安装流程由各自的测试使用固定数据验证。
+jest.mock('../src/features/update/components/AppUpdateBootstrap', () => ({
+  AppUpdateBootstrap: () => null,
+}));
+
 test('可以完成本地恢复并渲染禁食首页', async () => {
   let renderer: ReactTestRenderer.ReactTestRenderer;
 

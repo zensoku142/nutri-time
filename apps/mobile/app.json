@@ -3,7 +3,7 @@
     "name": "NutriTime",
     "slug": "nutritime",
     "icon": "./assets/branding/app-icon.png",
-    "version": "1.0.0",
+    "version": "0.1.0",
     "platforms": [
       "android"
     ],
@@ -11,6 +11,9 @@
     "android": {
       "package": "com.zensoku.nutritime",
       "versionCode": 1000001,
+      "permissions": [
+        "android.permission.REQUEST_INSTALL_PACKAGES"
+      ],
       "allowBackup": false,
       "predictiveBackGestureEnabled": false,
       "adaptiveIcon": {
@@ -40,6 +43,7 @@
         }
       ],
       "./plugins/with-shared-debug-keystore",
+      "./plugins/with-release-signing",
       "expo-notifications",
       [
         "expo-splash-screen",

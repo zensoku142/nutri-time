@@ -39,6 +39,7 @@ NutriTime/
 - Wear 正式接收、last good state（最近一次合法状态）、非法协议处理、eating 同步和手机—手表真实联调尚未完成。
 - 手机端没有后端、账号、云同步或手表双向操作；断食历史只保存在当前手机。
 - 手机通知不申请精确闹钟权限，只承诺在目标时间附近提醒，不承诺精确到秒。
+- 手机正式版从 `0.1.0` 开始，可由 GitHub Actions 发布签名 APK；应用每天最多自动检查一次 GitHub Release，并由用户确认安装更新。
 
 ## 手机端运行
 
@@ -64,5 +65,6 @@ pnpm start
 - 当前产品范围：[docs/product-scope.md](docs/product-scope.md)
 - 开发环境和命令：[docs/environment.md](docs/environment.md)
 - 包名与签名：[docs/signing.md](docs/signing.md)
+- 手机 APK 发布与自动更新：[docs/mobile-release.md](docs/mobile-release.md)
 - 同步协议草案：[docs/sync-contract.md](docs/sync-contract.md)
 - 手工验收：[docs/manual-test-checklist.md](docs/manual-test-checklist.md)

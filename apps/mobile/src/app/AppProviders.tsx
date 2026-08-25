@@ -4,6 +4,7 @@
 
 import {SafeAreaProvider} from 'react-native-safe-area-context';
 
+import {AppUpdateBootstrap} from '../features/update/components/AppUpdateBootstrap';
 import {RootNavigator} from './navigation/RootNavigator';
 
 // ---------- 应用树装配 ----------
@@ -13,6 +14,7 @@ export function AppProviders() {
   // 它把这些尺寸交给里面的 SafeAreaView 等组件，本身不会直接给页面添加空白。
   return (
     <SafeAreaProvider>
+      <AppUpdateBootstrap />
       <RootNavigator />
     </SafeAreaProvider>
   );

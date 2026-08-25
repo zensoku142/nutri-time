@@ -1,0 +1,157 @@
+name: 发布 Android 手机 APK
+
+on:
+  push:
+    tags:
+      - "mobile-v*.*.*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mobile-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-mobile-apk:
+    name: 构建并发布手机 APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: 读取标签对应源码
+        uses: actions/checkout@v6
+
+      - name: 准备 Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.11.0
+
+      - name: 准备 JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: 准备 Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: 安装 Android 36 编译工具
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: 准备 pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.19.0 --activate
+
+      - name: 核对发布版本
+        id: version
+        shell: bash
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#mobile-v}"
+          APP_VERSION="$(node --print "require('./apps/mobile/app.json').expo.version")"
+          PACKAGE_VERSION="$(node --print "require('./apps/mobile/package.json').version")"
+          VERSION_CODE="$(node --print "require('./apps/mobile/app.json').expo.android.versionCode")"
+
+          if [[ ! "$TAG_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "发布标签必须是 mobile-v0.1.0 这样的三段版本号。" >&2
+            exit 1
+          fi
+
+          if [[ "$TAG_VERSION" != "$APP_VERSION" || "$TAG_VERSION" != "$PACKAGE_VERSION" ]]; then
+            echo "标签、app.json 和 package.json 的版本必须完全相同。" >&2
+            exit 1
+          fi
+
+          if (( VERSION_CODE < 1000001 || VERSION_CODE > 1999999 )); then
+            echo "手机 versionCode 必须保持在 1000001～1999999 区间。" >&2
+            exit 1
+          fi
+
+          echo "version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "apk_name=NutriTime-mobile-v$APP_VERSION.apk" >> "$GITHUB_OUTPUT"
+
+      - name: 安装手机端依赖
+        working-directory: apps/mobile
+        run: pnpm install --frozen-lockfile
+
+      - name: 运行代码检查和测试
+        working-directory: apps/mobile
+        run: |
+          pnpm lint
+          pnpm typecheck
+          pnpm test --runInBand
+
+      - name: 检查正式签名凭据
+        env:
+          NUTRITIME_KEYSTORE_BASE64: ${{ secrets.NUTRITIME_KEYSTORE_BASE64 }}
+          NUTRITIME_RELEASE_STORE_PASSWORD: ${{ secrets.NUTRITIME_RELEASE_STORE_PASSWORD }}
+          NUTRITIME_RELEASE_KEY_ALIAS: ${{ secrets.NUTRITIME_RELEASE_KEY_ALIAS }}
+          NUTRITIME_RELEASE_KEY_PASSWORD: ${{ secrets.NUTRITIME_RELEASE_KEY_PASSWORD }}
+        run: |
+          for VALUE in \
+            "$NUTRITIME_KEYSTORE_BASE64" \
+            "$NUTRITIME_RELEASE_STORE_PASSWORD" \
+            "$NUTRITIME_RELEASE_KEY_ALIAS" \
+            "$NUTRITIME_RELEASE_KEY_PASSWORD"
+          do
+            if [[ -z "$VALUE" ]]; then
+              echo "GitHub 仓库缺少 NutriTime 正式签名 Secret。" >&2
+              exit 1
+            fi
+          done
+
+          printf '%s' "$NUTRITIME_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/nutritime-release.jks"
+
+      - name: 生成 Android 工程
+        working-directory: apps/mobile
+        run: pnpm prebuild:android
+
+      - name: 构建正式 APK
+        working-directory: apps/mobile/android
+        env:
+          NUTRITIME_RELEASE_STORE_FILE: ${{ runner.temp }}/nutritime-release.jks
+          NUTRITIME_RELEASE_STORE_PASSWORD: ${{ secrets.NUTRITIME_RELEASE_STORE_PASSWORD }}
+          NUTRITIME_RELEASE_KEY_ALIAS: ${{ secrets.NUTRITIME_RELEASE_KEY_ALIAS }}
+          NUTRITIME_RELEASE_KEY_PASSWORD: ${{ secrets.NUTRITIME_RELEASE_KEY_PASSWORD }}
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :app:assembleRelease --no-daemon
+
+      - name: 核对签名并生成更新说明
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          VERSION_CODE: ${{ steps.version.outputs.version_code }}
+          APK_NAME: ${{ steps.version.outputs.apk_name }}
+        run: |
+          mkdir -p release
+          cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk "release/$APK_NAME"
+
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          "$APKSIGNER" verify --print-certs "release/$APK_NAME"
+
+          APK_SHA256="$(sha256sum "release/$APK_NAME" | cut -d ' ' -f 1)"
+          jq -n \
+            --arg versionName "$VERSION" \
+            --argjson versionCode "$VERSION_CODE" \
+            --arg apkAssetName "$APK_NAME" \
+            --arg sha256 "$APK_SHA256" \
+            '{versionName: $versionName, versionCode: $versionCode, apkAssetName: $apkAssetName, sha256: $sha256}' \
+            > release/update.json
+
+      - name: 创建 GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          APK_NAME: ${{ steps.version.outputs.apk_name }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "release/$APK_NAME#NutriTime Android 手机安装包" \
+            "release/update.json#手机自动更新元数据" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --generate-notes \
+            --title "NutriTime $VERSION"

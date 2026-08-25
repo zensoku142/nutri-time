@@ -9,6 +9,7 @@
 - 由 Android 手机为断食和进食窗口分别安排、切换并提前取消的本地提醒；
 - 完成断食后的本地历史，以及汇总、上次窗口和最近七天三个统计模块；
 - 由 Expo Prebuild 生成的 Android 原生工程；
+- 正式版每天最多一次从 GitHub Release 检查、下载并交给 Android 确认安装的 APK 更新；
 - 公共页面外壳、主题、导航测试；
 - 字体和导航图片等静态资源。
 
@@ -45,9 +46,16 @@ pnpm typecheck
 pnpm test -- --runInBand
 ```
 
+## 正式版发布
+
+手机显示版本从 `0.1.0` 开始，初始 `versionCode` 仍使用手机区间的 `1000001`。推送 `mobile-v0.1.0` 形式的标签后，GitHub Actions 会构建签名 APK，并创建包含 APK 与 `update.json` 的 GitHub Release。
+
+首次生成正式证书、配置 GitHub Secrets、递增版本和发布标签的完整步骤见 `../../docs/mobile-release.md`。密钥和密码不能提交到仓库。
+
 ## 当前限制
 
 - 目前以 Expo Development Build 为主，不使用 Expo Go 承载后续原生能力。
+- 自动更新只在正式版运行；Android 仍会要求用户允许当前来源并确认安装，应用不能静默替换自己。
 - 周期页只保存当前活动阶段，重新打开后继续根据原开始时间和计划结束时间计算，不保存每秒变化的倒计时，也不会在倒计时到零时自动切换状态。
 - 完成记录使用 `@nutritime/fasting/history` 和独立的 `storageVersion: 1`，只保存在当前手机；未知版本或损坏内容不会被自动覆盖或删除。
 - 活动阶段使用 `@nutritime/fasting/current` 和 `storageVersion: 2`；阶段 3～7 的合法 v1 fasting 数据读取后会保留原会话并迁移到 v2。自定义比例使用 `@nutritime/cycle/plan`，正常结束 eating 不会清掉它。
