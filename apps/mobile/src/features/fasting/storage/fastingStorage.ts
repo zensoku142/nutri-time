@@ -1,12 +1,13 @@
 // ==================== 当前周期本地存储 ====================
 // AsyncStorage（类似手机里的小抽屉）会在 App 关闭后继续保留数据。
-// 这里只保存当前断食或进食窗口，不保存历史、格式化文字或每秒变化的剩余时间。
+// 当前阶段与完成历史使用不同的 key（手机小抽屉标签），都不保存格式化文字或每秒变化的剩余时间。
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {DEFAULT_CYCLE_PLAN} from '../domain/fasting';
 import type {
   ActiveCycleSession,
+  CompletedFastingSession,
   CyclePlan,
   FastingSession,
 } from '../domain/fasting';
@@ -37,6 +38,11 @@ export type CyclePlanReadResult =
   | {status: 'restored'; plan: CyclePlan}
   | {status: 'invalid'};
 
+export type FastingHistoryReadResult =
+  | {status: 'empty'; sessions: []}
+  | {status: 'restored'; sessions: CompletedFastingSession[]}
+  | {status: 'invalid'};
+
 type LegacyPersistedFastingState = {
   storageVersion: 1;
   session: FastingSession;
@@ -45,8 +51,10 @@ type LegacyPersistedFastingState = {
 
 const CURRENT_FASTING_STORAGE_KEY = '@nutritime/fasting/current';
 const CYCLE_PLAN_STORAGE_KEY = '@nutritime/cycle/plan';
+const FASTING_HISTORY_STORAGE_KEY = '@nutritime/fasting/history';
 const CURRENT_STORAGE_VERSION = 2;
 const CURRENT_PLAN_STORAGE_VERSION = 1;
+const CURRENT_HISTORY_STORAGE_VERSION = 1;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -95,6 +103,52 @@ function isValidCyclePlan(value: unknown): value is CyclePlan {
     value.eatingMinutes % 60 === 0 &&
     value.fastingMinutes + value.eatingMinutes === 24 * 60
   );
+}
+
+function isValidCompletedFastingSession(
+  value: unknown,
+): value is CompletedFastingSession {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value.id === 'string' &&
+    value.id.trim().length > 0 &&
+    typeof value.startAt === 'number' &&
+    Number.isFinite(value.startAt) &&
+    typeof value.plannedEndAt === 'number' &&
+    Number.isFinite(value.plannedEndAt) &&
+    value.plannedEndAt > value.startAt &&
+    typeof value.completedAt === 'number' &&
+    Number.isFinite(value.completedAt) &&
+    value.completedAt >= value.startAt
+  );
+}
+
+function parseFastingHistory(
+  storedValue: string | null,
+): FastingHistoryReadResult {
+  if (storedValue === null) {
+    return {status: 'empty', sessions: []};
+  }
+
+  try {
+    const parsedValue: unknown = JSON.parse(storedValue);
+
+    if (
+      !isRecord(parsedValue) ||
+      parsedValue.storageVersion !== CURRENT_HISTORY_STORAGE_VERSION ||
+      !Array.isArray(parsedValue.sessions) ||
+      !parsedValue.sessions.every(isValidCompletedFastingSession)
+    ) {
+      return {status: 'invalid'};
+    }
+
+    return {status: 'restored', sessions: parsedValue.sessions};
+  } catch {
+    return {status: 'invalid'};
+  }
 }
 
 function isValidPersistedCycleState(
@@ -231,6 +285,55 @@ export async function saveCyclePlanAndCurrentState(
       }),
     ],
     [CURRENT_FASTING_STORAGE_KEY, JSON.stringify(state)],
+  ]);
+}
+
+// ---------- 断食历史 ----------
+export async function readFastingHistory(): Promise<FastingHistoryReadResult> {
+  const storedValue = await AsyncStorage.getItem(FASTING_HISTORY_STORAGE_KEY);
+
+  return parseFastingHistory(storedValue);
+}
+
+export async function saveCompletedFastingAndCurrentState(
+  completedSession: FastingSession,
+  completedAt: number,
+  nextSession: ActiveCycleSession,
+): Promise<void> {
+  const storedValue = await AsyncStorage.getItem(FASTING_HISTORY_STORAGE_KEY);
+  const historyResult = parseFastingHistory(storedValue);
+
+  if (historyResult.status === 'invalid') {
+    // 损坏历史不能被新的记录悄悄覆盖，否则用户连原始数据也无法再排查或恢复。
+    throw new Error('本地断食历史无法读取');
+  }
+
+  const completedRecord: CompletedFastingSession = {
+    id: completedSession.id,
+    startAt: completedSession.startAt,
+    plannedEndAt: completedSession.plannedEndAt,
+    completedAt,
+  };
+  // 同一个会话若在上次写入后遇到系统中断，重试时替换原记录，避免统计次数被重复增加。
+  const nextHistory = [
+    ...historyResult.sessions.filter(session => session.id !== completedRecord.id),
+    completedRecord,
+  ];
+  const nextState: PersistedCycleState = {
+    storageVersion: CURRENT_STORAGE_VERSION,
+    session: nextSession,
+  };
+
+  // 当前阶段和刚完成的断食一起交给 AsyncStorage，页面不会先进入 eating 却漏掉对应统计记录。
+  await AsyncStorage.multiSet([
+    [CURRENT_FASTING_STORAGE_KEY, JSON.stringify(nextState)],
+    [
+      FASTING_HISTORY_STORAGE_KEY,
+      JSON.stringify({
+        storageVersion: CURRENT_HISTORY_STORAGE_VERSION,
+        sessions: nextHistory,
+      }),
+    ],
   ]);
 }
 

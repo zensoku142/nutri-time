@@ -20,6 +20,7 @@ import {
   readCyclePlan,
   readCurrentFastingState,
   resetCurrentCycleData,
+  saveCompletedFastingAndCurrentState,
   saveCyclePlan,
   saveCyclePlanAndCurrentState,
   saveCurrentFastingState,
@@ -36,6 +37,7 @@ jest.mock('../storage/fastingStorage', () => ({
   readCyclePlan: jest.fn(),
   readCurrentFastingState: jest.fn(),
   resetCurrentCycleData: jest.fn(),
+  saveCompletedFastingAndCurrentState: jest.fn(),
   saveCyclePlan: jest.fn(),
   saveCyclePlanAndCurrentState: jest.fn(),
   saveCurrentFastingState: jest.fn(),
@@ -70,6 +72,10 @@ const saveCurrentFastingStateMock =
 const resetCurrentCycleDataMock = resetCurrentCycleData as jest.MockedFunction<
   typeof resetCurrentCycleData
 >;
+const saveCompletedFastingAndCurrentStateMock =
+  saveCompletedFastingAndCurrentState as jest.MockedFunction<
+    typeof saveCompletedFastingAndCurrentState
+  >;
 const saveCyclePlanMock = saveCyclePlan as jest.MockedFunction<
   typeof saveCyclePlan
 >;
@@ -179,6 +185,7 @@ beforeEach(() => {
     plan: {fastingMinutes: 16 * 60, eatingMinutes: 8 * 60},
   });
   saveCurrentFastingStateMock.mockResolvedValue();
+  saveCompletedFastingAndCurrentStateMock.mockResolvedValue();
   saveCyclePlanMock.mockResolvedValue();
   saveCyclePlanAndCurrentStateMock.mockResolvedValue();
   clearCurrentFastingStateMock.mockResolvedValue();
@@ -871,14 +878,16 @@ test('结束断食时先保存 eating，再切换提醒并向 Wear v1 urgent 提
     }),
   );
   const saveDeferred = createDeferred<void>();
-  saveCurrentFastingStateMock
-    .mockReturnValueOnce(saveDeferred.promise)
-    .mockResolvedValue();
+  saveCompletedFastingAndCurrentStateMock.mockReturnValueOnce(
+    saveDeferred.promise,
+  );
   const renderer = await renderScreen();
 
   pressButton(renderer, '结束断食');
 
-  expect(saveCurrentFastingStateMock).toHaveBeenCalledWith(
+  expect(saveCompletedFastingAndCurrentStateMock).toHaveBeenCalledWith(
+    VALID_SESSION,
+    FIXED_NOW,
     VALID_EATING_SESSION,
   );
   expect(getRenderedText(renderer)).toContain('断食已进行');
@@ -904,13 +913,12 @@ test('结束断食时先保存 eating，再切换提醒并向 Wear v1 urgent 提
     VALID_EATING_SESSION.plannedEndAt,
     'eating',
   );
-  expect(saveCurrentFastingStateMock).toHaveBeenNthCalledWith(
-    2,
+  expect(saveCurrentFastingStateMock).toHaveBeenCalledWith(
     VALID_EATING_SESSION,
     'notification-1',
   );
   expect(
-    saveCurrentFastingStateMock.mock.invocationCallOrder[0],
+    saveCompletedFastingAndCurrentStateMock.mock.invocationCallOrder[0],
   ).toBeLessThan(
     cancelCycleCompletionNotificationMock.mock.invocationCallOrder[0],
   );
@@ -938,7 +946,9 @@ test('eating 保存失败时保持 fasting，不取消提醒或提交 idle', asy
       completionNotificationId: 'notification-fasting',
     }),
   );
-  saveCurrentFastingStateMock.mockRejectedValue(new Error('write failed'));
+  saveCompletedFastingAndCurrentStateMock.mockRejectedValue(
+    new Error('write failed'),
+  );
   const renderer = await renderScreen();
 
   pressButton(renderer, '结束断食');
@@ -1001,7 +1011,9 @@ test('eating 提醒或 Wear 同步失败都不回滚 eating', async () => {
 
   expect(getRenderedText(renderer)).toContain('进食窗口');
   expect(getRenderedText(renderer)).toContain('提醒未启用');
-  expect(saveCurrentFastingStateMock).toHaveBeenCalledWith(
+  expect(saveCompletedFastingAndCurrentStateMock).toHaveBeenCalledWith(
+    VALID_SESSION,
+    FIXED_NOW,
     VALID_EATING_SESSION,
   );
   expect(clearCurrentFastingStateMock).not.toHaveBeenCalled();
@@ -1122,7 +1134,9 @@ test('快速重复点击在三个状态切换中都只执行一次主存储操�
   await flushPromises();
 
   const eatingSaveDeferred = createDeferred<void>();
-  saveCurrentFastingStateMock.mockReturnValueOnce(eatingSaveDeferred.promise);
+  saveCompletedFastingAndCurrentStateMock.mockReturnValueOnce(
+    eatingSaveDeferred.promise,
+  );
   const endFastingButton = renderer.root.findByProps({
     accessibilityLabel: '结束断食',
   });
@@ -1131,7 +1145,7 @@ test('快速重复点击在三个状态切换中都只执行一次主存储操�
     endFastingButton.props.onPress();
     endFastingButton.props.onPress();
   });
-  expect(saveCurrentFastingStateMock).toHaveBeenCalledTimes(2);
+  expect(saveCompletedFastingAndCurrentStateMock).toHaveBeenCalledTimes(1);
 
   await ReactTestRenderer.act(async () => {
     eatingSaveDeferred.resolve();

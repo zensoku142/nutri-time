@@ -8,7 +8,9 @@ import {
   clearCurrentFastingState,
   readCyclePlan,
   readCurrentFastingState,
+  readFastingHistory,
   resetCurrentCycleData,
+  saveCompletedFastingAndCurrentState,
   saveCyclePlan,
   saveCyclePlanAndCurrentState,
   saveCurrentFastingState,
@@ -28,6 +30,7 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
 const asyncStorageMock = AsyncStorage as jest.Mocked<typeof AsyncStorage>;
 const STORAGE_KEY = '@nutritime/fasting/current';
 const PLAN_STORAGE_KEY = '@nutritime/cycle/plan';
+const HISTORY_STORAGE_KEY = '@nutritime/fasting/history';
 const CUSTOM_PLAN = {fastingMinutes: 14 * 60, eatingMinutes: 10 * 60};
 const VALID_SESSION: FastingSession = {
   id: 'fasting-1787313600000',
@@ -133,6 +136,119 @@ test('活动中把新比例和重算后的阶段一起批量保存', async () =>
     ],
     [STORAGE_KEY, JSON.stringify(state)],
   ]);
+});
+
+test('没有断食历史时返回空数组', async () => {
+  asyncStorageMock.getItem.mockResolvedValue(null);
+
+  await expect(readFastingHistory()).resolves.toEqual({
+    status: 'empty',
+    sessions: [],
+  });
+  expect(asyncStorageMock.getItem).toHaveBeenCalledWith(HISTORY_STORAGE_KEY);
+});
+
+test('结束断食时批量保存 eating 和完成记录', async () => {
+  asyncStorageMock.getItem.mockResolvedValue(null);
+  asyncStorageMock.multiSet.mockResolvedValue();
+
+  await saveCompletedFastingAndCurrentState(
+    VALID_SESSION,
+    VALID_EATING_SESSION.startAt,
+    VALID_EATING_SESSION,
+  );
+
+  expect(asyncStorageMock.multiSet).toHaveBeenCalledWith([
+    [
+      STORAGE_KEY,
+      JSON.stringify({
+        storageVersion: 2,
+        session: VALID_EATING_SESSION,
+      }),
+    ],
+    [
+      HISTORY_STORAGE_KEY,
+      JSON.stringify({
+        storageVersion: 1,
+        sessions: [
+          {
+            id: VALID_SESSION.id,
+            startAt: VALID_SESSION.startAt,
+            plannedEndAt: VALID_SESSION.plannedEndAt,
+            completedAt: VALID_EATING_SESSION.startAt,
+          },
+        ],
+      }),
+    ],
+  ]);
+});
+
+test('同一断食重复保存时替换原记录，不增加累计次数', async () => {
+  const previousRecord = {
+    id: VALID_SESSION.id,
+    startAt: VALID_SESSION.startAt,
+    plannedEndAt: VALID_SESSION.plannedEndAt,
+    completedAt: VALID_EATING_SESSION.startAt - 60_000,
+  };
+  asyncStorageMock.getItem.mockResolvedValue(
+    JSON.stringify({storageVersion: 1, sessions: [previousRecord]}),
+  );
+  asyncStorageMock.multiSet.mockResolvedValue();
+
+  await saveCompletedFastingAndCurrentState(
+    VALID_SESSION,
+    VALID_EATING_SESSION.startAt,
+    VALID_EATING_SESSION,
+  );
+
+  const historyWrite = asyncStorageMock.multiSet.mock.calls[0][0][1][1];
+  expect(JSON.parse(historyWrite).sessions).toEqual([
+    {
+      ...previousRecord,
+      completedAt: VALID_EATING_SESSION.startAt,
+    },
+  ]);
+});
+
+test.each([
+  ['损坏 JSON', '{bad-json'],
+  [
+    '未知历史版本',
+    JSON.stringify({storageVersion: 2, sessions: []}),
+  ],
+  [
+    '完成时间早于开始时间',
+    JSON.stringify({
+      storageVersion: 1,
+      sessions: [
+        {
+          id: VALID_SESSION.id,
+          startAt: VALID_SESSION.startAt,
+          plannedEndAt: VALID_SESSION.plannedEndAt,
+          completedAt: VALID_SESSION.startAt - 1,
+        },
+      ],
+    }),
+  ],
+])('%s 的断食历史返回 invalid 且不删除', async (_name, storedValue) => {
+  asyncStorageMock.getItem.mockResolvedValue(storedValue);
+
+  await expect(readFastingHistory()).resolves.toEqual({status: 'invalid'});
+  expect(asyncStorageMock.removeItem).not.toHaveBeenCalled();
+  expect(asyncStorageMock.multiRemove).not.toHaveBeenCalled();
+});
+
+test('损坏历史不会被新的完成记录覆盖', async () => {
+  asyncStorageMock.getItem.mockResolvedValue('{bad-json');
+
+  await expect(
+    saveCompletedFastingAndCurrentState(
+      VALID_SESSION,
+      VALID_EATING_SESSION.startAt,
+      VALID_EATING_SESSION,
+    ),
+  ).rejects.toThrow('本地断食历史无法读取');
+  expect(asyncStorageMock.multiSet).not.toHaveBeenCalled();
 });
 
 test('storageVersion 1 旧数据会保留原断食并迁移为版本 2', async () => {

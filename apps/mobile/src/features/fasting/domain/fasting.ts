@@ -15,6 +15,13 @@ export type EatingSession = {
   plannedEndAt: number;
 };
 
+export type CompletedFastingSession = {
+  id: string;
+  startAt: number;
+  plannedEndAt: number;
+  completedAt: number;
+};
+
 // 判别联合（用 status 区分两种合法形状）让后续代码不能把断食和进食窗口的字段混在一起。
 export type ActiveCycleSession = FastingSession | EatingSession;
 

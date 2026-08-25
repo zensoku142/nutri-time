@@ -92,4 +92,25 @@
 - comparison history：旧弹层依赖两张卡片和两个按钮，不能直接滚动比例，记为 P1。改为复用时间选择器的吸附滚轮后，该问题已关闭。
 - findings：没有仍需处理的 P0、P1 或 P2 问题。
 
+## 断食统计三模块补充验收
+
+- source visual truth path：`design/qa/statistics/reference-statistics.jpg`
+- implementation screenshot path：`design/qa/statistics/nutritime-statistics-empty.png`
+- interaction screenshot path：`design/qa/statistics/nutritime-statistics-selected.png`
+- full-view comparison evidence：`design/qa/statistics/statistics-comparison.jpg`
+- viewport：来源为 1272 × 2772 px；实现为同一 Android 模拟器的 1080 × 2400 px、420 dpi，逻辑画面约 411 × 914 dp。
+- density normalization：来源按居中覆盖方式归一到 1080 × 2400；横向只裁掉约 10 px，没有移除三个模块中的任何内容。
+- state：实现处于统计页、空断食历史状态；没有为贴图而伪造完成记录，也没有结束或改写模拟器中已有的 eating 会话。
+- fonts and typography：继续使用全局 Roboto 系统字体；页面标题、模块标题、汇总数字、辅助文字和日期层级清楚，没有缺字、截断或异常换行。
+- spacing and layout rhythm：三个白色圆角卡片按参考顺序排列，并完整位于悬浮导航上方；较矮屏幕仍可继续滚动。
+- colors and visual tokens：沿用 NutriTime 已确认的浅绿背景、白色卡片、深蓝文字和青绿色主色；橙色只表示目标未达成。
+- image quality and asset fidelity：三个模块没有照片或品牌插画；最近七天使用实时数据柱形界面，不使用会失真的截图占位。
+- copy and content：累计次数、最长断食、连续断食、上次断食窗口、最近的断食和两种目标状态均已显示。空历史时明确说明没有完成记录，不虚构开始和结束时间。时间轴、喝水记录和波浪装饰留给对应功能任务。
+- focused region comparison evidence：并排图每侧保留 1080 px 宽度，标题、数字、日期与纵轴均可直接辨认，因此无需重复裁切。
+- primary interactions tested：通过正式底部导航打开统计页；点选 08/22 后，0.0h 提示从 08/24 移到所选日期；返回两个主标签均正常。
+- console errors checked：清空日志后完成上述交互，未出现 React Native error、warning、AndroidRuntime 崩溃或 fatal exception。
+- comparison history：第一轮只显示 24、16、8、0，记为 P2；补齐 20、12、4 后与参考的四小时间隔一致。第一轮图表日期被悬浮导航遮住，记为 P2；压缩空状态和图表高度后，第三模块完整位于导航上方。修正后证据为 `nutritime-statistics-empty.png` 与 `statistics-comparison.jpg`。
+- findings：请求范围内没有仍需处理的 P0、P1 或 P2 问题。
+- follow-up polish：[P3] 等真实历史详情页存在后再加入“查看时间轴”；等喝水功能存在后再加入喝水摘要和波浪装饰。
+
 final result: passed

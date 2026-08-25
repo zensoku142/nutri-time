@@ -42,6 +42,8 @@ export const theme = {
     navigationMaskStart: hexToRgba(PAGE_BACKGROUND, 0.65),
     navigationMaskEnd: hexToRgba(PAGE_BACKGROUND, 0.95),
     border: '#D3F2EA',
+    statisticsTrack: '#E5F7F1',
+    statisticsMissed: '#FFB45B',
     danger: '#FF6B6B',
   },
   fonts: {

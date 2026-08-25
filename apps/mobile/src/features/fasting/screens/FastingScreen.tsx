@@ -50,6 +50,7 @@ import {
   readCyclePlan,
   readCurrentFastingState,
   resetCurrentCycleData,
+  saveCompletedFastingAndCurrentState,
   saveCyclePlan,
   saveCyclePlanAndCurrentState,
   saveCurrentFastingState,
@@ -521,8 +522,13 @@ export function FastingScreen() {
           cyclePlan.eatingMinutes,
         );
 
-        // 用户结束断食后，先把新的 eating 会话保存成功；写入失败时页面和旧提醒都继续保持 fasting。
-        await saveCurrentFastingState(nextSession);
+        // 用户结束断食时，把本次实际结束时间和新的 eating 会话一起保存。
+        // 任一写入失败都继续显示原 fasting，避免统计记录与当前页面各成功一半。
+        await saveCompletedFastingAndCurrentState(
+          persistedState.session,
+          eatingStartNow,
+          nextSession,
+        );
 
         if (isMountedRef.current) {
           setNow(eatingStartNow);
