@@ -6,7 +6,7 @@
 
 - “禁食 / 统计”双入口悬浮胶囊导航；
 - 按确认稿最小扩展的周期界面、底部时间编辑层，以及可在 App 重开后恢复的 fasting/eating 当前会话和自定义比例；
-- 由 Android 手机为断食和进食窗口分别安排、切换并提前取消的本地提醒；
+- 由 Android 手机在活动阶段常驻显示系统倒计时，并为断食和进食窗口分别安排、切换及提前取消到期提醒；
 - 完成断食后的本地历史，以及汇总、上次窗口和最近七天三个统计模块；
 - 由 Expo Prebuild 生成的 Android 原生工程；
 - 正式版每天最多一次从 GitHub Release 检查、下载并交给 Android 确认安装的 APK 更新；
@@ -60,6 +60,7 @@ pnpm test -- --runInBand
 - 完成记录使用 `@nutritime/fasting/history` 和独立的 `storageVersion: 1`，只保存在当前手机；未知版本或损坏内容不会被自动覆盖或删除。
 - 活动阶段使用 `@nutritime/fasting/current` 和 `storageVersion: 2`；阶段 3～7 的合法 v1 fasting 数据读取后会保留原会话并迁移到 v2。自定义比例使用 `@nutritime/cycle/plan`，正常结束 eating 不会清掉它。
 - 顶部比例入口可以调整断食/进食时长；活动阶段的开始时间也可以修改。两种修改都先保存，再更新页面、结束时间和唯一提醒。
+- 通知栏倒计时由 Android 根据计划结束时间自行刷新，不会每秒唤醒 JavaScript、写入本地记录或向手表同步；目标到期后常驻倒计时自动移除，原有到期提醒继续负责声音提示。
 - 目标时间提醒不申请精确闹钟权限，因此可能受省电策略影响而延后，不承诺精确到秒。
 - 最近任务划掉、系统回收、设备重启和 force stop 的区别与阶段 4 实测状态见 `../../docs/manual-test-checklist.md`。
 - Wear OS 不自行安排同类提醒；现有 Wear v1 只支持 idle/fasting，手机进入 eating 时向旧协议提交 idle，避免手表继续显示断食。这是兼容降级，Wear eating、协议错误处理和真实联调仍未完成。

@@ -5,11 +5,22 @@ import * as Notifications from 'expo-notifications';
 import type {PermissionStatus} from 'expo';
 
 import {
+  startCountdown,
+  stopCountdown,
+} from '../../../../modules/fasting-notification';
+import {
   cancelCycleCompletionNotification,
   isCycleCompletionNotificationScheduled,
   requestCycleNotificationPermission,
   scheduleCycleCompletionNotification,
+  startCycleCountdownNotification,
+  stopCycleCountdownNotification,
 } from './fastingNotifications';
+
+jest.mock('../../../../modules/fasting-notification', () => ({
+  startCountdown: jest.fn(),
+  stopCountdown: jest.fn(),
+}));
 
 jest.mock('expo-notifications', () => ({
   AndroidImportance: {DEFAULT: 5},
@@ -24,11 +35,15 @@ jest.mock('expo-notifications', () => ({
 }));
 
 const notificationsMock = Notifications as jest.Mocked<typeof Notifications>;
+const startCountdownMock = jest.mocked(startCountdown);
+const stopCountdownMock = jest.mocked(stopCountdown);
 const PLANNED_END_AT = 1_787_371_200_000;
 
 beforeEach(() => {
   jest.clearAllMocks();
   notificationsMock.setNotificationChannelAsync.mockResolvedValue(null);
+  startCountdownMock.mockResolvedValue();
+  stopCountdownMock.mockResolvedValue();
 });
 
 test('先建立 Android 通知渠道，再检查已有权限', async () => {
@@ -133,4 +148,16 @@ test('按系统取件号码查询和取消对应提醒', async () => {
   expect(
     notificationsMock.cancelScheduledNotificationAsync,
   ).toHaveBeenCalledWith('notification-1');
+});
+
+test('通知栏倒计时只在阶段边界调用 Android 一次', async () => {
+  await startCycleCountdownNotification(PLANNED_END_AT, 'fasting');
+  await stopCycleCountdownNotification();
+
+  expect(startCountdownMock).toHaveBeenCalledWith(
+    PLANNED_END_AT,
+    'fasting',
+  );
+  expect(startCountdownMock).toHaveBeenCalledTimes(1);
+  expect(stopCountdownMock).toHaveBeenCalledTimes(1);
 });

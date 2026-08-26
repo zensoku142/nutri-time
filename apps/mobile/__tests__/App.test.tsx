@@ -35,6 +35,12 @@ jest.mock('expo-notifications', () => ({
   setNotificationHandler: jest.fn(),
 }));
 
+// 完整入口没有 Android 通知栏；这里让页面能执行残留通知清理，真实倒计时桥由模块测试和真机验证负责。
+jest.mock('../modules/fasting-notification', () => ({
+  startCountdown: jest.fn(() => Promise.resolve()),
+  stopCountdown: jest.fn(() => Promise.resolve()),
+}));
+
 // 启动测试没有 Android 原生环境，因此只隔离开发诊断模块；真正桥接由模拟器实测确认。
 jest.mock('../modules/wear-data-layer', () => ({
   ping: jest.fn(),

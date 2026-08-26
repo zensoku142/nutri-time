@@ -44,6 +44,8 @@ import {
   isCycleCompletionNotificationScheduled,
   requestCycleNotificationPermission,
   scheduleCycleCompletionNotification,
+  startCycleCountdownNotification,
+  stopCycleCountdownNotification,
 } from '../notifications/fastingNotifications';
 import {
   clearCurrentFastingState,
@@ -88,6 +90,8 @@ type TimeEditor = 'plan' | 'start' | null;
 
 const REMINDER_UNAVAILABLE_MESSAGE =
   '当前周期仍在继续，但提醒未启用。请留意计划结束时间。';
+const COUNTDOWN_UNAVAILABLE_MESSAGE =
+  '到期提醒已启用，但通知栏倒计时未显示。请留意计划结束时间。';
 const REMINDER_CANCEL_FAILED_MESSAGE =
   '状态已更新，但上一阶段提醒可能仍会出现，请在系统通知中忽略它。';
 
@@ -95,6 +99,31 @@ function reportReminderError(action: string, error: unknown) {
   // 诊断日志只记录失败步骤和错误种类，不记录会话时间或其他可能暴露用户习惯的数据。
   const errorName = error instanceof Error ? error.name : 'UnknownError';
   console.error(`[NutriTime] ${action}`, {errorName});
+}
+
+async function startCycleCountdownSafely(
+  session: ActiveCycleSession,
+): Promise<boolean> {
+  try {
+    await startCycleCountdownNotification(
+      session.plannedEndAt,
+      session.status,
+    );
+    return true;
+  } catch (error) {
+    reportReminderError('notification-countdown-start-failed', error);
+    return false;
+  }
+}
+
+async function stopCycleCountdownSafely(): Promise<boolean> {
+  try {
+    await stopCycleCountdownNotification();
+    return true;
+  } catch (error) {
+    reportReminderError('notification-countdown-stop-failed', error);
+    return false;
+  }
 }
 
 async function submitCurrentFastingToWear(
@@ -114,16 +143,16 @@ async function submitCurrentFastingToWear(
 
 async function scheduleAndPersistCompletionReminder(
   session: ActiveCycleSession,
-): Promise<string | null> {
+): Promise<{notificationId: string | null; countdownStarted: boolean}> {
   try {
     const permissionGranted = await requestCycleNotificationPermission();
 
     if (!permissionGranted) {
-      return null;
+      return {notificationId: null, countdownStarted: false};
     }
   } catch (error) {
     reportReminderError('notification-permission-check-failed', error);
-    return null;
+    return {notificationId: null, countdownStarted: false};
   }
 
   let notificationId: string;
@@ -135,12 +164,13 @@ async function scheduleAndPersistCompletionReminder(
     );
   } catch (error) {
     reportReminderError('notification-schedule-failed', error);
-    return null;
+    return {notificationId: null, countdownStarted: false};
   }
 
   try {
     await saveCurrentFastingState(session, notificationId);
-    return notificationId;
+    const countdownStarted = await startCycleCountdownSafely(session);
+    return {notificationId, countdownStarted};
   } catch (error) {
     reportReminderError('notification-id-save-failed', error);
 
@@ -155,7 +185,7 @@ async function scheduleAndPersistCompletionReminder(
       );
     }
 
-    return null;
+    return {notificationId: null, countdownStarted: false};
   }
 }
 
@@ -169,7 +199,8 @@ async function replaceCompletionReminder(
   session: ActiveCycleSession,
   now: number,
 ): Promise<ReminderReplacementResult> {
-  let previousReminderCancelFailed = false;
+  // 常驻倒计时使用固定通知位置；先移除旧阶段，再安排新阶段，过去时间也不会留下负数计时。
+  let previousReminderCancelFailed = !(await stopCycleCountdownSafely());
 
   if (previousNotificationId !== undefined) {
     try {
@@ -190,9 +221,9 @@ async function replaceCompletionReminder(
     };
   }
 
-  const notificationId = await scheduleAndPersistCompletionReminder(session);
+  const reminderResult = await scheduleAndPersistCompletionReminder(session);
 
-  if (notificationId === null) {
+  if (reminderResult.notificationId === null) {
     return {
       notificationId: null,
       notice: previousReminderCancelFailed
@@ -201,11 +232,20 @@ async function replaceCompletionReminder(
     };
   }
 
+  const countdownNotice = reminderResult.countdownStarted
+    ? null
+    : COUNTDOWN_UNAVAILABLE_MESSAGE;
   return {
-    notificationId,
-    notice: previousReminderCancelFailed
-      ? REMINDER_CANCEL_FAILED_MESSAGE
-      : null,
+    notificationId: reminderResult.notificationId,
+    notice:
+      [
+        previousReminderCancelFailed
+          ? REMINDER_CANCEL_FAILED_MESSAGE
+          : null,
+        countdownNotice,
+      ]
+        .filter(Boolean)
+        .join(' ') || null,
   };
 }
 
@@ -296,23 +336,35 @@ export function FastingScreen() {
           }
 
           if (shouldScheduleReminder) {
-            const notificationId =
+            const reminderResult =
               await scheduleAndPersistCompletionReminder(storedState.session);
 
             if (requestId !== recoveryRequestIdRef.current) {
               return;
             }
 
-            if (notificationId === null) {
+            if (reminderResult.notificationId === null) {
               setReminderNotice(REMINDER_UNAVAILABLE_MESSAGE);
             } else {
               restoredState = {
                 ...restoredState,
-                completionNotificationId: notificationId,
+                completionNotificationId: reminderResult.notificationId,
               };
               setPersistedState(restoredState);
+
+              if (!reminderResult.countdownStarted) {
+                setReminderNotice(COUNTDOWN_UNAVAILABLE_MESSAGE);
+              }
             }
+          } else if (!(await startCycleCountdownSafely(storedState.session))) {
+            // 系统里已有到期提醒时无需重复安排，但 App 重开后仍要把常驻倒计时重新放回通知栏。
+            setReminderNotice(previousNotice =>
+              previousNotice ?? COUNTDOWN_UNAVAILABLE_MESSAGE,
+            );
           }
+        } else {
+          // 旧版或系统异常可能留下已经走完的常驻通知；恢复到期会话时主动清理，避免显示负数。
+          await stopCycleCountdownSafely();
         }
 
         // Wear v1 只认识 idle/fasting。恢复 eating 时提交普通 idle，避免旧手表重开后继续显示上一段断食。
@@ -339,6 +391,8 @@ export function FastingScreen() {
           return;
         }
       } else {
+        // 本地已经没有活动阶段时清掉可能残留的固定通知，不影响系统中其他 NutriTime 提醒。
+        await stopCycleCountdownSafely();
         setPersistedState(null);
       }
 
@@ -486,18 +540,22 @@ export function FastingScreen() {
         }
 
         // 本地会话是用户点击开始后的主要结果，提醒只是辅助能力；后面的权限或系统通知失败都不能取消断食。
-        const notificationId =
+        const reminderResult =
           await scheduleAndPersistCompletionReminder(nextSession);
 
         if (isMountedRef.current) {
-          if (notificationId === null) {
+          if (reminderResult.notificationId === null) {
             setReminderNotice(REMINDER_UNAVAILABLE_MESSAGE);
           } else {
             setPersistedState({
               storageVersion: 2,
               session: nextSession,
-              completionNotificationId: notificationId,
+              completionNotificationId: reminderResult.notificationId,
             });
+
+            if (!reminderResult.countdownStarted) {
+              setReminderNotice(COUNTDOWN_UNAVAILABLE_MESSAGE);
+            }
           }
         }
 
@@ -574,17 +632,20 @@ export function FastingScreen() {
           setPersistedState(null);
         }
 
+        let reminderCancelFailed = !(await stopCycleCountdownSafely());
+
         if (notificationId !== undefined) {
           try {
             // 本地清除已经成功，取消提醒失败也不能把用户明确结束的进食窗口恢复回来。
             await cancelCycleCompletionNotification(notificationId);
           } catch (error) {
+            reminderCancelFailed = true;
             reportReminderError('notification-cancel-failed', error);
-
-            if (isMountedRef.current) {
-              setReminderNotice(REMINDER_CANCEL_FAILED_MESSAGE);
-            }
           }
+        }
+
+        if (reminderCancelFailed && isMountedRef.current) {
+          setReminderNotice(REMINDER_CANCEL_FAILED_MESSAGE);
         }
 
         // 进入 eating 时已经向 Wear v1 提交过 idle；结束 eating 不重复发送相同状态，避免没有业务变化的额外同步。
@@ -847,6 +908,7 @@ export function FastingScreen() {
     try {
       // 损坏数据不会自动消失；只有用户点下重置后才清除，避免把未知旧版本悄悄当成正常 idle。
       await resetCurrentCycleData();
+      await stopCycleCountdownSafely();
 
       if (isMountedRef.current) {
         setCyclePlan(DEFAULT_CYCLE_PLAN);

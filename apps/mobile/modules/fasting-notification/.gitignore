@@ -1,0 +1,2 @@
+# Gradle 会重新生成这些编译产物，仓库只保存 android/src 里的 Kotlin 源码。
+android/build/

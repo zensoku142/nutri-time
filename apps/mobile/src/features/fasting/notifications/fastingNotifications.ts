@@ -3,6 +3,10 @@
 
 import * as Notifications from 'expo-notifications';
 
+import {
+  startCountdown,
+  stopCountdown,
+} from '../../../../modules/fasting-notification';
 import type {ActiveCycleSession} from '../domain/fasting';
 
 type CycleStage = ActiveCycleSession['status'];
@@ -88,4 +92,17 @@ export async function cancelCycleCompletionNotification(
   notificationId: string,
 ): Promise<void> {
   await Notifications.cancelScheduledNotificationAsync(notificationId);
+}
+
+// ---------- 通知栏常驻倒计时 ----------
+export async function startCycleCountdownNotification(
+  plannedEndAt: number,
+  stage: CycleStage,
+): Promise<void> {
+  // 这里只传不会变化的目标时间；通知栏里的秒数由 Android 自己刷新，应用无需每秒重发通知。
+  await startCountdown(plannedEndAt, stage);
+}
+
+export async function stopCycleCountdownNotification(): Promise<void> {
+  await stopCountdown();
 }

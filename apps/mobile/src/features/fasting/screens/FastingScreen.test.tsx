@@ -14,6 +14,8 @@ import {
   isCycleCompletionNotificationScheduled,
   requestCycleNotificationPermission,
   scheduleCycleCompletionNotification,
+  startCycleCountdownNotification,
+  stopCycleCountdownNotification,
 } from '../notifications/fastingNotifications';
 import {
   clearCurrentFastingState,
@@ -48,6 +50,8 @@ jest.mock('../notifications/fastingNotifications', () => ({
   isCycleCompletionNotificationScheduled: jest.fn(),
   requestCycleNotificationPermission: jest.fn(),
   scheduleCycleCompletionNotification: jest.fn(),
+  startCycleCountdownNotification: jest.fn(),
+  stopCycleCountdownNotification: jest.fn(),
 }));
 
 jest.mock('../../../../modules/wear-data-layer', () => ({
@@ -98,6 +102,14 @@ const requestCycleNotificationPermissionMock =
 const scheduleCycleCompletionNotificationMock =
   scheduleCycleCompletionNotification as jest.MockedFunction<
     typeof scheduleCycleCompletionNotification
+  >;
+const startCycleCountdownNotificationMock =
+  startCycleCountdownNotification as jest.MockedFunction<
+    typeof startCycleCountdownNotification
+  >;
+const stopCycleCountdownNotificationMock =
+  stopCycleCountdownNotification as jest.MockedFunction<
+    typeof stopCycleCountdownNotification
   >;
 const syncCurrentFastingMock = jest.mocked(syncCurrentFasting);
 
@@ -196,6 +208,8 @@ beforeEach(() => {
   );
   isCycleCompletionNotificationScheduledMock.mockResolvedValue(true);
   cancelCycleCompletionNotificationMock.mockResolvedValue();
+  startCycleCountdownNotificationMock.mockResolvedValue();
+  stopCycleCountdownNotificationMock.mockResolvedValue();
   syncCurrentFastingMock.mockResolvedValue();
 });
 
@@ -538,6 +552,10 @@ test('恢复时已有有效提醒不会重复安排', async () => {
   );
   expect(requestCycleNotificationPermissionMock).not.toHaveBeenCalled();
   expect(scheduleCycleCompletionNotificationMock).not.toHaveBeenCalled();
+  expect(startCycleCountdownNotificationMock).toHaveBeenCalledWith(
+    VALID_SESSION.plannedEndAt,
+    'fasting',
+  );
   expect(saveCurrentFastingStateMock).not.toHaveBeenCalled();
 
   ReactTestRenderer.act(() => renderer.unmount());
@@ -756,6 +774,11 @@ test('权限允许时只安排一条提醒并把取件号码写回外层状态',
     VALID_SESSION.plannedEndAt,
     'fasting',
   );
+  expect(startCycleCountdownNotificationMock).toHaveBeenCalledWith(
+    VALID_SESSION.plannedEndAt,
+    'fasting',
+  );
+  expect(startCycleCountdownNotificationMock).toHaveBeenCalledTimes(1);
   expect(saveCurrentFastingStateMock).toHaveBeenNthCalledWith(
     1,
     VALID_SESSION,
@@ -771,6 +794,29 @@ test('权限允许时只安排一条提醒并把取件号码写回外层状态',
     scheduleCycleCompletionNotificationMock.mock.invocationCallOrder[0],
   );
   expect(getRenderedText(renderer)).not.toContain('提醒未启用');
+
+  ReactTestRenderer.act(() => renderer.unmount());
+});
+
+test('常驻倒计时显示失败时保留到期提醒并给出单独说明', async () => {
+  jest.spyOn(console, 'error').mockImplementation(() => undefined);
+  requestCycleNotificationPermissionMock.mockResolvedValue(true);
+  startCycleCountdownNotificationMock.mockRejectedValue(
+    new Error('native countdown failed'),
+  );
+  const renderer = await renderScreen();
+
+  pressButton(renderer, '开始断食');
+  await flushPromises();
+
+  expect(getRenderedText(renderer)).toContain(
+    '到期提醒已启用，但通知栏倒计时未显示',
+  );
+  expect(saveCurrentFastingStateMock).toHaveBeenLastCalledWith(
+    VALID_SESSION,
+    'notification-1',
+  );
+  expect(cancelCycleCompletionNotificationMock).not.toHaveBeenCalled();
 
   ReactTestRenderer.act(() => renderer.unmount());
 });
@@ -1055,6 +1101,7 @@ test('结束 eating 时先清本地，成功后回 idle 并取消提醒', async 
   expect(cancelCycleCompletionNotificationMock).toHaveBeenCalledWith(
     'notification-eating',
   );
+  expect(stopCycleCountdownNotificationMock).toHaveBeenCalledTimes(1);
   expect(
     clearCurrentFastingStateMock.mock.invocationCallOrder[0],
   ).toBeLessThan(
@@ -1250,6 +1297,10 @@ test('interval 每秒只刷新时间，不会再次持久化', async () => {
     isCycleCompletionNotificationScheduledMock.mock.calls.length;
   const cancelCallCount =
     cancelCycleCompletionNotificationMock.mock.calls.length;
+  const countdownStartCallCount =
+    startCycleCountdownNotificationMock.mock.calls.length;
+  const countdownStopCallCount =
+    stopCycleCountdownNotificationMock.mock.calls.length;
   const syncCallCount = syncCurrentFastingMock.mock.calls.length;
 
   ReactTestRenderer.act(() => {
@@ -1271,6 +1322,12 @@ test('interval 每秒只刷新时间，不会再次持久化', async () => {
   expect(cancelCycleCompletionNotificationMock).toHaveBeenCalledTimes(
     cancelCallCount,
   );
+  expect(startCycleCountdownNotificationMock).toHaveBeenCalledTimes(
+    countdownStartCallCount,
+  );
+  expect(stopCycleCountdownNotificationMock).toHaveBeenCalledTimes(
+    countdownStopCallCount,
+  );
   expect(syncCurrentFastingMock).toHaveBeenCalledTimes(syncCallCount);
 
   ReactTestRenderer.act(() => renderer.unmount());
@@ -1288,6 +1345,10 @@ test('eating 每秒刷新也不会写存储、通知或 DataItem', async () => {
   const saveCallCount = saveCurrentFastingStateMock.mock.calls.length;
   const queryCallCount =
     isCycleCompletionNotificationScheduledMock.mock.calls.length;
+  const countdownStartCallCount =
+    startCycleCountdownNotificationMock.mock.calls.length;
+  const countdownStopCallCount =
+    stopCycleCountdownNotificationMock.mock.calls.length;
   const syncCallCount = syncCurrentFastingMock.mock.calls.length;
 
   ReactTestRenderer.act(() => {
@@ -1302,6 +1363,12 @@ test('eating 每秒刷新也不会写存储、通知或 DataItem', async () => {
   );
   expect(scheduleCycleCompletionNotificationMock).not.toHaveBeenCalled();
   expect(cancelCycleCompletionNotificationMock).not.toHaveBeenCalled();
+  expect(startCycleCountdownNotificationMock).toHaveBeenCalledTimes(
+    countdownStartCallCount,
+  );
+  expect(stopCycleCountdownNotificationMock).toHaveBeenCalledTimes(
+    countdownStopCallCount,
+  );
   expect(syncCurrentFastingMock).toHaveBeenCalledTimes(syncCallCount);
 
   ReactTestRenderer.act(() => renderer.unmount());
