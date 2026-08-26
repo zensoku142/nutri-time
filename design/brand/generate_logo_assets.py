@@ -20,6 +20,9 @@ TRANSPARENT = (0, 0, 0, 0)
 # 确认稿中左上大图标的位置固定在这块区域；只提取这一区域可避开字标和色卡。
 SOURCE_ICON_BOX = (192, 59, 964, 831)
 MASTER_SIZE = 1024
+# Adaptive Icon（Android 会按桌面主题裁成不同外形的图标）使用 108×108 的前景层。
+# 各设备只保证中央 66×66 的安全区完整显示；缩小整层后，标志原有的透明边距会让真实轮廓留在区内。
+ADAPTIVE_ICON_MARK_SIZE = round(MASTER_SIZE * 0.75)
 
 APP_EXPORT_SIZES = (1024, 512, 256, 192, 144, 128, 96, 72, 64, 48, 32)
 WATCH_EXPORT_SIZES = (512, 256, 192, 144, 96, 72, 48, 32)
@@ -119,6 +122,18 @@ def create_background_icon(mark: Image.Image, shape: str) -> Image.Image:
     return icon
 
 
+def create_adaptive_icon_foreground(mark: Image.Image) -> Image.Image:
+    foreground = Image.new("RGBA", (MASTER_SIZE, MASTER_SIZE), TRANSPARENT)
+    resized_mark = mark.resize(
+        (ADAPTIVE_ICON_MARK_SIZE, ADAPTIVE_ICON_MARK_SIZE),
+        Image.Resampling.LANCZOS,
+    )
+    offset = (MASTER_SIZE - ADAPTIVE_ICON_MARK_SIZE) // 2
+
+    foreground.alpha_composite(resized_mark, (offset, offset))
+    return foreground
+
+
 def save_png(image: Image.Image, path: Path, size: int | tuple[int, int] | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     output = image
@@ -186,6 +201,8 @@ def main() -> None:
     color_mark = create_mark(white_mask, coral_mask, WHITE)
     dark_mark = create_mark(white_mask, coral_mask, DEEP_GREEN)
     monochrome_mark = create_mark(white_mask, coral_mask, WHITE, coral_color=None)
+    adaptive_color_mark = create_adaptive_icon_foreground(color_mark)
+    adaptive_monochrome_mark = create_adaptive_icon_foreground(monochrome_mark)
 
     square_icon = create_background_icon(color_mark, "square")
     rounded_icon = create_background_icon(color_mark, "rounded")
@@ -215,8 +232,8 @@ def main() -> None:
 
     mobile_assets = REPOSITORY_ROOT / "apps" / "mobile" / "assets" / "branding"
     save_png(square_icon, mobile_assets / "app-icon.png")
-    save_png(color_mark, mobile_assets / "adaptive-icon-foreground.png")
-    save_png(monochrome_mark, mobile_assets / "adaptive-icon-monochrome.png")
+    save_png(adaptive_color_mark, mobile_assets / "adaptive-icon-foreground.png")
+    save_png(adaptive_monochrome_mark, mobile_assets / "adaptive-icon-monochrome.png")
     save_png(create_splash_lockup(color_mark), mobile_assets / "splash-icon.png")
 
     wear_res = REPOSITORY_ROOT / "apps" / "wear" / "app" / "src" / "main" / "res"
