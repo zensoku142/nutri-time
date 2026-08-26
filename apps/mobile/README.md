@@ -48,7 +48,7 @@ pnpm test -- --runInBand
 
 ## 正式版发布
 
-手机显示版本从 `0.1.0` 开始，初始 `versionCode` 仍使用手机区间的 `1000001`。推送 `mobile-v0.1.0` 形式的标签后，GitHub Actions 会构建签名 APK，并创建包含 APK 与 `update.json` 的 GitHub Release。
+当前手机显示版本为 `0.2.0`，`versionCode` 为 `1000002`。推送 `mobile-v0.2.0` 形式的标签后，GitHub Actions 会构建签名 APK，并创建包含 APK 与 `update.json` 的 GitHub Release。
 
 首次生成正式证书、配置 GitHub Secrets、递增版本和发布标签的完整步骤见 `../../docs/mobile-release.md`。密钥和密码不能提交到仓库。
 
@@ -59,7 +59,7 @@ pnpm test -- --runInBand
 - 周期页只保存当前活动阶段，重新打开后继续根据原开始时间和计划结束时间计算，不保存每秒变化的倒计时，也不会在倒计时到零时自动切换状态。
 - 完成记录使用 `@nutritime/fasting/history` 和独立的 `storageVersion: 1`，只保存在当前手机；未知版本或损坏内容不会被自动覆盖或删除。
 - 活动阶段使用 `@nutritime/fasting/current` 和 `storageVersion: 2`；阶段 3～7 的合法 v1 fasting 数据读取后会保留原会话并迁移到 v2。自定义比例使用 `@nutritime/cycle/plan`，正常结束 eating 不会清掉它。
-- 顶部比例入口可以调整断食/进食时长；活动阶段的开始时间也可以修改。两种修改都先保存，再更新页面、结束时间和唯一提醒。
+- 顶部比例入口可以调整断食/进食时长；活动阶段的开始时间和计划结束时间也可以分别修改。修改都先保存，再更新页面和唯一提醒；手动结束时间只影响当前阶段，不改变后续周期使用的比例。
 - 通知栏倒计时由 Android 根据计划结束时间自行刷新，不会每秒唤醒 JavaScript、写入本地记录或向手表同步；目标到期后常驻倒计时自动移除，原有到期提醒继续负责声音提示。
 - 目标时间提醒不申请精确闹钟权限，因此可能受省电策略影响而延后，不承诺精确到秒。
 - 最近任务划掉、系统回收、设备重启和 force stop 的区别与阶段 4 实测状态见 `../../docs/manual-test-checklist.md`。

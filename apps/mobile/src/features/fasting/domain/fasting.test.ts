@@ -13,6 +13,7 @@ import {
   getElapsedMs,
   getRemainingMs,
   getSessionDurationMinutes,
+  updateCycleSessionEnd,
   updateCycleSessionStart,
 } from './fasting';
 
@@ -89,6 +90,24 @@ test('修改开始时间时保留会话身份并按计划重算结束时间', ()
     startAt: adjustedStartAt,
     plannedEndAt: adjustedStartAt + 14 * ONE_HOUR_MS,
   });
+});
+
+test('修改结束时间只更新当前会话，不改变开始时间和会话身份', () => {
+  const originalSession = createFastingSession(FIXED_NOW);
+  const adjustedEndAt = FIXED_NOW + 15 * ONE_HOUR_MS;
+
+  expect(updateCycleSessionEnd(originalSession, adjustedEndAt)).toEqual({
+    ...originalSession,
+    plannedEndAt: adjustedEndAt,
+  });
+});
+
+test('结束时间不晚于开始时间时拒绝生成非法会话', () => {
+  const originalSession = createFastingSession(FIXED_NOW);
+
+  expect(() => updateCycleSessionEnd(originalSession, FIXED_NOW)).toThrow(
+    '结束时间必须晚于开始时间',
+  );
 });
 
 test('刚开始时已进行为零，剩余为完整时长', () => {

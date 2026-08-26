@@ -392,6 +392,99 @@ test('修改 fasting 开始时间会保留会话 ID、重算结束时间并切�
   ReactTestRenderer.act(() => renderer.unmount());
 });
 
+test('修改 fasting 结束时间会保留开始时间和比例，并切换提醒与 Wear 快照', async () => {
+  requestCycleNotificationPermissionMock.mockResolvedValue(true);
+  readCurrentFastingStateMock.mockResolvedValue(
+    restoredState({
+      ...VALID_PERSISTED_STATE,
+      completionNotificationId: 'notification-fasting',
+    }),
+  );
+  const renderer = await renderScreen();
+
+  pressButton(renderer, '修改断食结束时间');
+  expect(getRenderedText(renderer)).toContain('修改断食结束时间');
+  pressButton(renderer, '选择后一小时');
+  pressButton(renderer, '确认修改');
+  await flushPromises();
+
+  const adjustedSession = {
+    ...VALID_SESSION,
+    plannedEndAt: VALID_SESSION.plannedEndAt + 60 * 60 * 1000,
+  };
+  expect(saveCurrentFastingStateMock).toHaveBeenCalledWith(adjustedSession);
+  expect(saveCyclePlanMock).not.toHaveBeenCalled();
+  expect(saveCyclePlanAndCurrentStateMock).not.toHaveBeenCalled();
+  expect(cancelCycleCompletionNotificationMock).toHaveBeenCalledWith(
+    'notification-fasting',
+  );
+  expect(scheduleCycleCompletionNotificationMock).toHaveBeenCalledWith(
+    adjustedSession.plannedEndAt,
+    'fasting',
+  );
+  expect(syncCurrentFastingMock).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      status: 'fasting',
+      startAt: adjustedSession.startAt,
+      plannedEndAt: adjustedSession.plannedEndAt,
+    }),
+    true,
+  );
+  expect(getRenderedText(renderer)).toContain('明天 13:00');
+
+  ReactTestRenderer.act(() => renderer.unmount());
+});
+
+test('结束时间不晚于开始时间时保持编辑弹层且不写入', async () => {
+  readCurrentFastingStateMock.mockResolvedValue(restoredState());
+  const renderer = await renderScreen();
+
+  pressButton(renderer, '修改断食结束时间');
+  pressButton(renderer, '选择前一天');
+  pressButton(renderer, '确认修改');
+  await flushPromises();
+
+  expect(getRenderedText(renderer)).toContain('结束时间必须晚于开始时间');
+  expect(saveCurrentFastingStateMock).not.toHaveBeenCalled();
+  expect(cancelCycleCompletionNotificationMock).not.toHaveBeenCalled();
+
+  ReactTestRenderer.act(() => renderer.unmount());
+});
+
+test('修改 eating 结束时间会更新当前提醒，但不重复提交 Wear v1 idle', async () => {
+  requestCycleNotificationPermissionMock.mockResolvedValue(true);
+  readCurrentFastingStateMock.mockResolvedValue(
+    restoredState({
+      storageVersion: 2,
+      session: VALID_EATING_SESSION,
+      completionNotificationId: 'notification-eating',
+    }),
+  );
+  const renderer = await renderScreen();
+
+  pressButton(renderer, '修改进食结束时间');
+  pressButton(renderer, '选择后一小时');
+  pressButton(renderer, '确认修改');
+  await flushPromises();
+
+  const adjustedSession = {
+    ...VALID_EATING_SESSION,
+    plannedEndAt: VALID_EATING_SESSION.plannedEndAt + 60 * 60 * 1000,
+  };
+  expect(saveCurrentFastingStateMock).toHaveBeenCalledWith(adjustedSession);
+  expect(cancelCycleCompletionNotificationMock).toHaveBeenCalledWith(
+    'notification-eating',
+  );
+  expect(scheduleCycleCompletionNotificationMock).toHaveBeenCalledWith(
+    adjustedSession.plannedEndAt,
+    'eating',
+  );
+  // Wear v1 只认识 idle/fasting；恢复 eating 时已有一次 idle，改结束时间不需要重复提交同一状态。
+  expect(syncCurrentFastingMock).toHaveBeenCalledTimes(1);
+
+  ReactTestRenderer.act(() => renderer.unmount());
+});
+
 test('开始时间晚于当前时间时保持编辑弹层且不写入', async () => {
   readCurrentFastingStateMock.mockResolvedValue(restoredState());
   const renderer = await renderScreen();

@@ -45,6 +45,23 @@ type StartTimeEditorModalProps = SharedEditorProps & {
   onShiftMinute: (amount: number) => void;
 };
 
+type EndTimeEditorModalProps = SharedEditorProps & {
+  stageLabel: string;
+  draftEndAt: number;
+  onShiftDay: (amount: number) => void;
+  onShiftHour: (amount: number) => void;
+  onShiftMinute: (amount: number) => void;
+};
+
+type StageTimeEditorModalProps = SharedEditorProps & {
+  stageLabel: string;
+  timeKind: 'start' | 'end';
+  draftTimeAt: number;
+  onShiftDay: (amount: number) => void;
+  onShiftHour: (amount: number) => void;
+  onShiftMinute: (amount: number) => void;
+};
+
 type EditorSheetProps = SharedEditorProps & {
   title: string;
   children: ReactNode;
@@ -72,13 +89,15 @@ type WheelPickerProps = {
 };
 
 // 参考应用的 WheelView（松手后自动对齐一行的滚轮）每行高 56 dp，中间显示 5 行中的第 3 行。
-// 小时和分钟两侧各准备 30 个值，用户一次可以快速滑过多项；日期只保留用户确认的前天、昨天和今天。
+// 小时和分钟两侧各准备 30 个值，用户一次可以快速滑过多项；开始日期只保留用户确认的前天、昨天和今天。
 const WHEEL_ITEM_HEIGHT = 56;
 const WHEEL_VISIBLE_ITEM_COUNT = 5;
 const TIME_WHEEL_CENTER_INDEX = 30;
 const WHEEL_SIDE_PADDING =
   ((WHEEL_VISIBLE_ITEM_COUNT - 1) / 2) * WHEEL_ITEM_HEIGHT;
-const DATE_DAY_OFFSETS = [-2, -1, 0] as const;
+const START_DATE_DAY_OFFSETS = [-2, -1, 0] as const;
+const END_DATE_DAY_SHIFTS = [-2, -1, 0, 1, 2] as const;
+const END_DATE_CENTER_INDEX = 2;
 const TIME_WHEEL_OFFSETS = Array.from(
   {length: TIME_WHEEL_CENTER_INDEX * 2 + 1},
   (_, index) => index - TIME_WHEEL_CENTER_INDEX,
@@ -303,7 +322,7 @@ function getWheelItemAccessibilityLabel(
   return `选择${direction}${amountLabel}${unitLabel}`;
 }
 
-function createDateWheelData(
+function createStartDateWheelData(
   draftStartAt: number,
   relativeDateReference: number,
 ): {items: WheelPickerItem[]; selectedIndex: number} {
@@ -313,9 +332,9 @@ function createDateWheelData(
   );
   const selectedIndex = Math.max(
     0,
-    Math.min(DATE_DAY_OFFSETS.length - 1, selectedDayOffset + 2),
+    Math.min(START_DATE_DAY_OFFSETS.length - 1, selectedDayOffset + 2),
   );
-  const items = DATE_DAY_OFFSETS.map(dayOffset => {
+  const items = START_DATE_DAY_OFFSETS.map(dayOffset => {
     const timestamp = shiftTimestamp(
       relativeDateReference,
       'day',
@@ -337,6 +356,30 @@ function createDateWheelData(
   });
 
   return {items, selectedIndex};
+}
+
+function createEndDateWheelData(
+  draftEndAt: number,
+  relativeDateReference: number,
+): {items: WheelPickerItem[]; selectedIndex: number} {
+  // 结束时间可能跨过午夜，也可能在阶段到期后补改；始终把当前草稿放在中间，用户就能连续向前或向后选择日期。
+  const items = END_DATE_DAY_SHIFTS.map(offset => {
+    const timestamp = shiftTimestamp(draftEndAt, 'day', offset);
+    const value = formatRelativeDate(timestamp, relativeDateReference);
+
+    return {
+      accessibilityLabel: getWheelItemAccessibilityLabel(
+        'day',
+        offset,
+        value,
+      ),
+      key: offset,
+      offset,
+      value,
+    };
+  });
+
+  return {items, selectedIndex: END_DATE_CENTER_INDEX};
 }
 
 function createTimeWheelItems(
@@ -601,10 +644,11 @@ function WheelPicker({
   );
 }
 
-export function StartTimeEditorModal({
+function StageTimeEditorModal({
   visible,
   stageLabel,
-  draftStartAt,
+  timeKind,
+  draftTimeAt,
   isSaving,
   error,
   onShiftDay,
@@ -612,7 +656,7 @@ export function StartTimeEditorModal({
   onShiftMinute,
   onCancel,
   onConfirm,
-}: StartTimeEditorModalProps) {
+}: StageTimeEditorModalProps) {
   const [relativeDateReference, setRelativeDateReference] = useState(Date.now);
 
   useEffect(() => {
@@ -623,17 +667,21 @@ export function StartTimeEditorModal({
   }, [visible]);
 
   const dateWheel = useMemo(
-    () => createDateWheelData(draftStartAt, relativeDateReference),
-    [draftStartAt, relativeDateReference],
+    () =>
+      timeKind === 'start'
+        ? createStartDateWheelData(draftTimeAt, relativeDateReference)
+        : createEndDateWheelData(draftTimeAt, relativeDateReference),
+    [draftTimeAt, relativeDateReference, timeKind],
   );
   const hourItems = useMemo(
-    () => createTimeWheelItems(draftStartAt, 'hour', relativeDateReference),
-    [draftStartAt, relativeDateReference],
+    () => createTimeWheelItems(draftTimeAt, 'hour', relativeDateReference),
+    [draftTimeAt, relativeDateReference],
   );
   const minuteItems = useMemo(
-    () => createTimeWheelItems(draftStartAt, 'minute', relativeDateReference),
-    [draftStartAt, relativeDateReference],
+    () => createTimeWheelItems(draftTimeAt, 'minute', relativeDateReference),
+    [draftTimeAt, relativeDateReference],
   );
+  const timeLabel = timeKind === 'start' ? '开始' : '结束';
 
   return (
     <EditorSheet
@@ -641,7 +689,7 @@ export function StartTimeEditorModal({
       isSaving={isSaving}
       onCancel={onCancel}
       onConfirm={onConfirm}
-      title={`修改${stageLabel}开始时间`}
+      title={`修改${stageLabel}${timeLabel}时间`}
       visible={visible}>
       <View style={styles.startTimeContent}>
         <View style={styles.pickerRow}>
@@ -652,6 +700,7 @@ export function StartTimeEditorModal({
             isDateColumn
             items={dateWheel.items}
             onSelect={item => onShiftDay(item.offset)}
+            recenterAfterSelect={timeKind === 'end'}
             selectedIndex={dateWheel.selectedIndex}
             visible={visible}
           />
@@ -678,10 +727,38 @@ export function StartTimeEditorModal({
           />
         </View>
         <Text style={styles.helperText}>
-          上下滑动选择，开始时间不能晚于现在
+          {timeKind === 'start'
+            ? '上下滑动选择，开始时间不能晚于现在'
+            : '上下滑动选择，结束时间必须晚于开始时间'}
         </Text>
       </View>
     </EditorSheet>
+  );
+}
+
+export function StartTimeEditorModal({
+  draftStartAt,
+  ...props
+}: StartTimeEditorModalProps) {
+  return (
+    <StageTimeEditorModal
+      {...props}
+      draftTimeAt={draftStartAt}
+      timeKind="start"
+    />
+  );
+}
+
+export function EndTimeEditorModal({
+  draftEndAt,
+  ...props
+}: EndTimeEditorModalProps) {
+  return (
+    <StageTimeEditorModal
+      {...props}
+      draftTimeAt={draftEndAt}
+      timeKind="end"
+    />
   );
 }
 

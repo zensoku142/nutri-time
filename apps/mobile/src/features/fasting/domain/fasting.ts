@@ -119,6 +119,18 @@ export function updateCycleSessionStart(
   };
 }
 
+export function updateCycleSessionEnd(
+  session: ActiveCycleSession,
+  plannedEndAt: number,
+): ActiveCycleSession {
+  // 手动结束时间只覆盖当前阶段，不反向修改全局比例；下一段周期仍使用用户原来选择的 16:8 或其他计划。
+  if (plannedEndAt <= session.startAt) {
+    throw new RangeError('结束时间必须晚于开始时间');
+  }
+
+  return {...session, plannedEndAt};
+}
+
 // ---------- 时间计算 ----------
 export function getRemainingMs(plannedEndAt: number, now: number): number {
   // 目标时间到了以后会话仍然保留，但剩余时间锁在零，页面因此不会显示负数。

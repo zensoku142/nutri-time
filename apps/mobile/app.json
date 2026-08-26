@@ -3,14 +3,14 @@
     "name": "NutriTime",
     "slug": "nutritime",
     "icon": "./assets/branding/app-icon.png",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "platforms": [
       "android"
     ],
     "scheme": "nutritime",
     "android": {
       "package": "com.zensoku.nutritime",
-      "versionCode": 1000001,
+      "versionCode": 1000002,
       "permissions": [
         "android.permission.REQUEST_INSTALL_PACKAGES"
       ],

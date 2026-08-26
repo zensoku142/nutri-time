@@ -21,6 +21,7 @@ import {
 import {theme} from '../../../app/theme';
 import {
   CyclePlanEditorModal,
+  EndTimeEditorModal,
   StartTimeEditorModal,
 } from '../components/CycleTimeEditorModals';
 import {
@@ -36,6 +37,7 @@ import {
   getSessionDurationMinutes,
   MAX_FASTING_HOURS,
   MIN_FASTING_HOURS,
+  updateCycleSessionEnd,
   updateCycleSessionStart,
 } from '../domain/fasting';
 import type {ActiveCycleSession, CyclePlan} from '../domain/fasting';
@@ -84,9 +86,11 @@ type ActiveMutation =
   | 'endingEating'
   | 'updatingPlan'
   | 'updatingStart'
+  | 'updatingEnd'
   | 'resetting'
   | null;
-type TimeEditor = 'plan' | 'start' | null;
+type TimeEditor = 'plan' | 'start' | 'end' | null;
+type EditableTimeUnit = 'day' | 'hour' | 'minute';
 
 const REMINDER_UNAVAILABLE_MESSAGE =
   '当前周期仍在继续，但提醒未启用。请留意计划结束时间。';
@@ -94,6 +98,28 @@ const COUNTDOWN_UNAVAILABLE_MESSAGE =
   '到期提醒已启用，但通知栏倒计时未显示。请留意计划结束时间。';
 const REMINDER_CANCEL_FAILED_MESSAGE =
   '状态已更新，但上一阶段提醒可能仍会出现，请在系统通知中忽略它。';
+
+function shiftEditableTimestamp(
+  timestamp: number,
+  unit: EditableTimeUnit,
+  amount: number,
+): number {
+  const date = new Date(timestamp);
+
+  if (unit === 'day') {
+    date.setDate(date.getDate() + amount);
+  } else if (unit === 'hour') {
+    // 小时滚轮独立循环：23 后面是 00，00 前面是 23，但日期仍由日期滚轮决定。
+    const nextHour = ((date.getHours() + amount) % 24 + 24) % 24;
+    date.setHours(nextHour);
+  } else {
+    // 分钟滚轮同样独立循环，跨过 59/00 时不能偷偷改变用户已经选好的小时。
+    const nextMinute = ((date.getMinutes() + amount) % 60 + 60) % 60;
+    date.setMinutes(nextMinute);
+  }
+
+  return date.getTime();
+}
 
 function reportReminderError(action: string, error: unknown) {
   // 诊断日志只记录失败步骤和错误种类，不记录会话时间或其他可能暴露用户习惯的数据。
@@ -267,6 +293,7 @@ export function FastingScreen() {
     DEFAULT_CYCLE_PLAN.fastingMinutes / 60,
   );
   const [draftStartAt, setDraftStartAt] = useState(0);
+  const [draftEndAt, setDraftEndAt] = useState(0);
   const [editorError, setEditorError] = useState<string | null>(null);
   const isMutatingRef = useRef(false);
   const recoveryRequestIdRef = useRef(0);
@@ -274,7 +301,9 @@ export function FastingScreen() {
   const session = persistedState?.session ?? null;
   const isMutating = activeMutation !== null;
   const isEditorSaving =
-    activeMutation === 'updatingPlan' || activeMutation === 'updatingStart';
+    activeMutation === 'updatingPlan' ||
+    activeMutation === 'updatingStart' ||
+    activeMutation === 'updatingEnd';
 
   const restoreCurrentSession = useCallback(async () => {
     const requestId = recoveryRequestIdRef.current + 1;
@@ -693,6 +722,20 @@ export function FastingScreen() {
     setTimeEditor('start');
   };
 
+  const openEndTimeEditor = () => {
+    if (
+      recoveryStatus !== 'ready' ||
+      persistedState === null ||
+      isMutatingRef.current
+    ) {
+      return;
+    }
+
+    setDraftEndAt(persistedState.session.plannedEndAt);
+    setEditorError(null);
+    setTimeEditor('end');
+  };
+
   const closeTimeEditor = () => {
     if (!isEditorSaving) {
       setTimeEditor(null);
@@ -701,26 +744,21 @@ export function FastingScreen() {
   };
 
   const shiftDraftStartAt = (
-    unit: 'day' | 'hour' | 'minute',
+    unit: EditableTimeUnit,
     amount: number,
   ) => {
-    setDraftStartAt(currentDraft => {
-      const date = new Date(currentDraft);
+    setDraftStartAt(currentDraft =>
+      shiftEditableTimestamp(currentDraft, unit, amount),
+    );
+  };
 
-      if (unit === 'day') {
-        date.setDate(date.getDate() + amount);
-      } else if (unit === 'hour') {
-        // 小时滚轮独立循环：23 后面是 00，00 前面是 23，但日期保持不变。
-        const nextHour = ((date.getHours() + amount) % 24 + 24) % 24;
-        date.setHours(nextHour);
-      } else {
-        // 分钟滚轮同样独立循环，跨过 59/00 时不能偷偷改变用户已经选好的小时。
-        const nextMinute = ((date.getMinutes() + amount) % 60 + 60) % 60;
-        date.setMinutes(nextMinute);
-      }
-
-      return date.getTime();
-    });
+  const shiftDraftEndAt = (
+    unit: EditableTimeUnit,
+    amount: number,
+  ) => {
+    setDraftEndAt(currentDraft =>
+      shiftEditableTimestamp(currentDraft, unit, amount),
+    );
   };
 
   const confirmPlanChange = async () => {
@@ -811,36 +849,25 @@ export function FastingScreen() {
     }
   };
 
-  const confirmStartTimeChange = async () => {
-    if (isMutatingRef.current || persistedState === null) {
-      return;
-    }
-
-    const currentState = persistedState;
-    const actionNow = Date.now();
-
-    if (draftStartAt > actionNow) {
-      setEditorError('开始时间不能晚于当前时间，请重新选择。');
-      return;
-    }
-
-    const nextSession = updateCycleSessionStart(
-      currentState.session,
-      draftStartAt,
-      getSessionDurationMinutes(cyclePlan, currentState.session.status),
-    );
+  const persistSessionTimeChange = async (
+    currentState: PersistedCycleState,
+    nextSession: ActiveCycleSession,
+    actionNow: number,
+    mutation: 'updatingStart' | 'updatingEnd',
+    failureMessage: string,
+  ) => {
     const nextState: PersistedCycleState = {
       storageVersion: 2,
       session: nextSession,
     };
 
     isMutatingRef.current = true;
-    setActiveMutation('updatingStart');
+    setActiveMutation(mutation);
     setEditorError(null);
     setReminderNotice(null);
 
     try {
-      // 修改开始时间同样先保存；失败时页面、旧提醒和 Wear 快照都维持原值。
+      // 两种时间修改都先写进手机，再更新页面、提醒和 Wear；保存失败时所有地方继续使用旧时间。
       await saveCurrentFastingState(nextSession);
 
       if (isMountedRef.current) {
@@ -880,7 +907,7 @@ export function FastingScreen() {
       }
     } catch {
       if (isMountedRef.current) {
-        setEditorError('开始时间保存失败，原时间仍然有效，请重试。');
+        setEditorError(failureMessage);
       }
     } finally {
       isMutatingRef.current = false;
@@ -889,6 +916,59 @@ export function FastingScreen() {
         setActiveMutation(null);
       }
     }
+  };
+
+  const confirmStartTimeChange = async () => {
+    if (isMutatingRef.current || persistedState === null) {
+      return;
+    }
+
+    const currentState = persistedState;
+    const actionNow = Date.now();
+
+    if (draftStartAt > actionNow) {
+      setEditorError('开始时间不能晚于当前时间，请重新选择。');
+      return;
+    }
+
+    const nextSession = updateCycleSessionStart(
+      currentState.session,
+      draftStartAt,
+      getSessionDurationMinutes(cyclePlan, currentState.session.status),
+    );
+    await persistSessionTimeChange(
+      currentState,
+      nextSession,
+      actionNow,
+      'updatingStart',
+      '开始时间保存失败，原时间仍然有效，请重试。',
+    );
+  };
+
+  const confirmEndTimeChange = async () => {
+    if (isMutatingRef.current || persistedState === null) {
+      return;
+    }
+
+    const currentState = persistedState;
+    const actionNow = Date.now();
+
+    if (draftEndAt <= currentState.session.startAt) {
+      setEditorError('结束时间必须晚于开始时间，请重新选择。');
+      return;
+    }
+
+    const nextSession = updateCycleSessionEnd(
+      currentState.session,
+      draftEndAt,
+    );
+    await persistSessionTimeChange(
+      currentState,
+      nextSession,
+      actionNow,
+      'updatingEnd',
+      '结束时间保存失败，原时间仍然有效，请重试。',
+    );
   };
 
   const handleRecoveryAction = async () => {
@@ -1104,9 +1184,20 @@ export function FastingScreen() {
               </Text>
             </View>
             <View style={styles.summaryItem}>
-              <Text style={styles.summaryLabel}>
-                {session === null ? '目标' : '计划结束'}
-              </Text>
+              <View style={styles.summaryLabelRow}>
+                <Text style={styles.summaryLabel}>
+                  {session === null ? '目标' : '计划结束'}
+                </Text>
+                {session === null ? null : (
+                  <Pressable
+                    accessibilityLabel={`修改${isFasting ? '断食' : '进食'}结束时间`}
+                    accessibilityRole="button"
+                    disabled={isMutating}
+                    onPress={openEndTimeEditor}>
+                    <Text style={styles.editTimeText}>修改</Text>
+                  </Pressable>
+                )}
+              </View>
               <Text
                 adjustsFontSizeToFit
                 numberOfLines={1}
@@ -1170,6 +1261,18 @@ export function FastingScreen() {
         onShiftMinute={amount => shiftDraftStartAt('minute', amount)}
         stageLabel={isEating ? '进食' : '断食'}
         visible={timeEditor === 'start'}
+      />
+      <EndTimeEditorModal
+        draftEndAt={draftEndAt}
+        error={editorError}
+        isSaving={isEditorSaving}
+        onCancel={closeTimeEditor}
+        onConfirm={confirmEndTimeChange}
+        onShiftDay={amount => shiftDraftEndAt('day', amount)}
+        onShiftHour={amount => shiftDraftEndAt('hour', amount)}
+        onShiftMinute={amount => shiftDraftEndAt('minute', amount)}
+        stageLabel={isEating ? '进食' : '断食'}
+        visible={timeEditor === 'end'}
       />
     </SafeAreaView>
   );

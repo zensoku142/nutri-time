@@ -7,6 +7,7 @@ import ReactTestRenderer from 'react-test-renderer';
 
 import {
   CyclePlanEditorModal,
+  EndTimeEditorModal,
   StartTimeEditorModal,
 } from './CycleTimeEditorModals';
 
@@ -86,6 +87,42 @@ test('小时滚轮停在后两行时一次移动两小时', () => {
 
   expect(onShiftHour).toHaveBeenCalledWith(2);
   ReactTestRenderer.act(() => renderer.unmount());
+});
+
+test('结束时间日期滚轮能从当前草稿继续选择更早或更晚日期', () => {
+  const onShiftDay = jest.fn();
+  let renderer: ReactTestRenderer.ReactTestRenderer;
+
+  ReactTestRenderer.act(() => {
+    renderer = ReactTestRenderer.create(
+      <EndTimeEditorModal
+        draftEndAt={FIXED_NOW + 16 * 60 * 60 * 1000}
+        error={null}
+        isSaving={false}
+        onCancel={jest.fn()}
+        onConfirm={jest.fn()}
+        onShiftDay={onShiftDay}
+        onShiftHour={jest.fn()}
+        onShiftMinute={jest.fn()}
+        stageLabel="断食"
+        visible
+      />,
+    );
+  });
+
+  expect(JSON.stringify(renderer!.toJSON())).toContain('修改断食结束时间');
+  expect(JSON.stringify(renderer!.toJSON())).toContain(
+    '结束时间必须晚于开始时间',
+  );
+
+  ReactTestRenderer.act(() => {
+    renderer!.root
+      .findByProps({accessibilityLabel: '选择后一天'})
+      .props.onPress();
+  });
+
+  expect(onShiftDay).toHaveBeenCalledWith(1);
+  ReactTestRenderer.act(() => renderer!.unmount());
 });
 
 test('周期比例滚轮增加断食时同步减少进食', () => {
